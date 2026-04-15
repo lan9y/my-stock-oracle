@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import time
 
-# --- TERMINAL CONFIG ---
+# --- CONFIG ---
 st.set_page_config(page_title="OraclePro™ VMI Terminal", layout="wide")
 API_KEY = "vJFsENcD098gHX91EBFKtKIAKoCTpj9t"
 BASE_URL = "https://financialmodelingprep.com/api/v3"
@@ -25,15 +25,15 @@ st.markdown("""
 st.title("🔮 OraclePro™ VMI Terminal")
 
 # --- DATA PERSISTENCE ---
-if 'oracle_data' not in st.session_state:
-    st.session_state.oracle_data = None
+if 'vmi_terminal_data' not in st.session_state:
+    st.session_state.vmi_terminal_data = None
 
 ticker = st.sidebar.text_input("SYMBOL", value="AAPL").upper().strip()
 run_btn = st.sidebar.button("EXECUTE VMI ANALYSIS")
 
 # --- VMI 20-YEAR IV CALCULATOR (Exact Excel Logic) ---
 def calculate_vmi_iv(fcf, debt, cash, shares, beta):
-    rf, mrp = 0.03608, 0.02728 # Excel Constants
+    rf, mrp = 0.03608, 0.02728 # Your Excel constants
     discount_rate = rf + (beta * mrp)
     g1, g2, g3 = 0.1748, 0.15, 0.04 # 3-Stage Growth
     total_pv = 0
@@ -45,47 +45,31 @@ def calculate_vmi_iv(fcf, debt, cash, shares, beta):
     return round((total_pv - debt + cash) / shares, 2) if shares > 0 else 0
 
 if run_btn:
-    st.session_state.oracle_data = None
-    with st.spinner(f'Sequential Scavenger Sync for {ticker}...'):
+    st.session_state.vmi_terminal_data = None
+    with st.spinner(f'Sequential Safe-Sync for {ticker}...'):
         try:
-            # STEP 1: Profile (Core Data)
+            # Slow-Burn Sequential Fetching
             p = requests.get(f"{BASE_URL}/profile/{ticker}?apikey={API_KEY}").json()
-            time.sleep(2.5)
-            
-            # STEP 2: Quote (Backup for Price/EPS if Profile is restricted)
-            q = requests.get(f"{BASE_URL}/quote/{ticker}?apikey={API_KEY}").json()
-            time.sleep(2.5)
-            
-            # STEP 3: Metrics (Shares/FCF)
+            time.sleep(2.0)
             m = requests.get(f"{BASE_URL}/key-metrics-ttm/{ticker}?apikey={API_KEY}").json()
-            time.sleep(2.5)
-            
-            # STEP 4: Ratios (ROIC for Moat)
+            time.sleep(2.0)
             r = requests.get(f"{BASE_URL}/ratios-ttm/{ticker}?apikey={API_KEY}").json()
-            time.sleep(2.5)
-            
-            # STEP 5: History (Chart)
+            time.sleep(2.0)
             h = requests.get(f"{BASE_URL}/historical-price-full/{ticker}?apikey={API_KEY}&timeseries=250").json()
 
-            # --- RESILIENT DATA ASSEMBLY ---
-            # If profile (p) fails, scavenge from quote (q)
-            prof_base = p[0] if (p and isinstance(p, list)) else (q[0] if (q and isinstance(q, list)) else {})
-            
-            if not prof_base:
-                st.error("🚦 API Rate Blocked. Please wait 60s and try a different ticker.")
-            else:
-                st.session_state.oracle_data = {
-                    "prof": prof_base,
-                    "met": m[0] if (m and isinstance(m, list)) else {},
-                    "rat": r[0] if (r and isinstance(r, list)) else {},
-                    "hist": h
+            if p and isinstance(p, list):
+                st.session_state.vmi_terminal_data = {
+                    "prof": p[0], "met": m[0] if m else {},
+                    "rat": r[0] if r else {}, "hist": h
                 }
-        except Exception as e:
-            st.error(f"Sync error: {str(e)}")
+            else:
+                st.error("🚦 API Rate Blocked. Wait 60s and try again.")
+        except:
+            st.error("Network sync issue. Please wait 60s.")
 
-# --- RENDER DASHBOARD ---
-if st.session_state.oracle_data:
-    sd = st.session_state.oracle_data
+# --- DISPLAY ENGINE ---
+if st.session_state.vmi_terminal_data:
+    sd = st.session_state.vmi_terminal_data
     prof, met, rat, hist = sd["prof"], sd["met"], sd["rat"], sd["hist"]
 
     tab_ov, tab_chart, tab_iv, tab_moat = st.tabs(["📊 Overview", "📈 VMI Chart", "🎯 20yr IV Model", "🛡️ AI Moat"])
@@ -97,8 +81,8 @@ if st.session_state.oracle_data:
         
         col_t, col_s = st.columns([3, 1])
         with col_t:
-            st.header(f"{prof.get('companyName', prof.get('name', ticker))} ({ticker})")
-            st.write(f"**Sector:** {prof.get('sector', 'N/A')} | **Industry:** {prof.get('industry', 'N/A')}")
+            st.header(f"{prof.get('companyName')} ({ticker})")
+            st.write(f"**Sector:** {prof.get('sector')} | **Industry:** {prof.get('industry')}")
         with col_s:
             st.markdown(f'<div class="moat-tag {moat_class}">{moat_status}</div>', unsafe_allow_html=True)
 
@@ -113,7 +97,7 @@ if st.session_state.oracle_data:
 
         st.divider()
         st.subheader("Nature of Company & Segment Deep-Dive")
-        st.write(prof.get('description', 'AI Segment analysis loading...'))
+        st.write(prof.get('description'))
 
     with tab_chart:
         if hist and 'historical' in hist:
@@ -127,10 +111,7 @@ if st.session_state.oracle_data:
 
     with tab_iv:
         cur_p = prof.get('price', 1)
-        # Use Market Cap from Profile or Quote
-        mkt_cap = prof.get('mktCap', prof.get('marketCap', 0))
-        shares = met.get('numberOfSharesTTM', (mkt_cap/cur_p if cur_p > 0 else 0))
-        
+        shares = met.get('numberOfSharesTTM', (prof.get('mktCap', 0)/cur_p))
         iv = calculate_vmi_iv(met.get('freeCashFlowTTM', 0), met.get('totalDebtTTM', 0), met.get('cashAndShortTermInvestmentsTTM', 0), shares, prof.get('beta', 1.1))
         
         c1, c2, c3 = st.columns(3)
