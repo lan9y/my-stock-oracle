@@ -6,12 +6,11 @@ st.set_page_config(page_title="StockOracle AI", layout="wide")
 # Your Verified API Key
 API_KEY = "vJFsENcD098gHX91EBFKtKIAKoCTpj9t" 
 
-# NEW 2026 URL STRUCTURE
-# We use 'stable' instead of 'v3' to avoid the Legacy error
+# THE NEW 2026 URL (Fixed Query Format)
 BASE_URL = "https://financialmodelingprep.com/api/stable"
 
 st.title("🔮 StockOracle™ Terminal")
-st.write("Institutional Analysis | Powered by Modern FMP Endpoints")
+st.write("Institutional Analysis | 2026 Stable Version")
 
 ticker_input = st.text_input("Enter Ticker Symbol (e.g., AAPL, NVDA)", value="AAPL")
 
@@ -19,18 +18,18 @@ if st.button("Analyze Now"):
     ticker = ticker_input.upper().strip()
     with st.spinner(f'Consulting 2026 Data for {ticker}...'):
         
-        # Updated URL using the /stable/ path
-        url = f"{BASE_URL}/profile/{ticker}?apikey={API_KEY}"
+        # FIXED: This uses the '?symbol=' format required by the new stable API
+        url = f"{BASE_URL}/profile?symbol={ticker}&apikey={API_KEY}"
         
         try:
             response = requests.get(url)
             data = response.json()
             
-            # Check for the error message you just saw
+            # 1. Check for API Errors (Limit/Legacy)
             if isinstance(data, dict) and "Error Message" in data:
                 st.error(f"🚫 API Issue: {data.get('Error Message')}")
-                st.info("Tip: If it says 'Legacy', the /stable/ endpoint should resolve it. If it says 'Limit', you have used your 250 daily credits.")
             
+            # 2. Check for successful data
             elif isinstance(data, list) and len(data) > 0:
                 stock = data[0]
                 
@@ -45,10 +44,10 @@ if st.button("Analyze Now"):
 
                 st.divider()
                 
-                # Oracle Metrics
+                # Oracle Metrics (Calculations)
                 c1, c2, c3 = st.columns(3)
                 price = stock.get('price', 0)
-                fair_value = round(price * 1.12, 2) # 12% Upside Projection
+                fair_value = round(price * 1.12, 2)
                 
                 c1.metric("Oracle Fair Value", f"${fair_value}", "12% Upside")
                 c2.metric("Moat Status", "Wide Moat", "Institutional")
@@ -57,7 +56,7 @@ if st.button("Analyze Now"):
                 st.success(f"Analysis Complete for {ticker}.")
             
             else:
-                st.error(f"❌ Ticker '{ticker}' not found. Please check the symbol.")
+                st.error(f"❌ Ticker '{ticker}' not found. Please try a major US stock like AAPL.")
 
         except Exception as e:
-            st.error(f"⚠️ Technical Glitch: {e}")
+            st.error(f"⚠️ Connection Glitch. Please refresh the page.")
