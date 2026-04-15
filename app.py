@@ -4,7 +4,7 @@ import pandas as pd
 
 # --- APP SETUP ---
 st.set_page_config(page_title="StockOracle AI", layout="wide")
-API_KEY = "YOUR_FREE_API_KEY" # Get one at financialmodelingprep.com
+API_KEY = apikey: vJFsENcD098gHX91EBFKtKIAKoCTpj9t # Get one at financialmodelingprep.com
 
 # --- STYLING ---
 st.markdown("""
