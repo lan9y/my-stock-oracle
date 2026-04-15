@@ -8,7 +8,7 @@ st.set_page_config(page_title="OraclePro™ VMI Terminal", layout="wide")
 API_KEY = "vJFsENcD098gHX91EBFKtKIAKoCTpj9t"
 BASE_URL = "https://financialmodelingprep.com/api/v3"
 
-# --- CUSTOM CSS (StockOracle Styles) ---
+# --- CUSTOM CSS (StockOracle Replicated Styles) ---
 st.markdown("""
     <style>
     .score-card { background-color: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 12px; text-align: center; }
@@ -24,25 +24,24 @@ st.title("🔮 OraclePro™ VMI Terminal")
 ticker = st.sidebar.text_input("SYMBOL", value="AAPL").upper().strip()
 run_btn = st.sidebar.button("EXECUTE VMI SCAN")
 
-@st.cache_data(ttl=900)
-def fetch_oracle(endpoint, params=""):
-    url = f"{BASE_URL}/{endpoint}/{ticker}?apikey={API_KEY}{params}"
+@st.cache_data(ttl=3600) # Cache for 1 hour to save credits
+def fetch_oracle(endpoint, ticker_val, params=""):
+    url = f"{BASE_URL}/{endpoint}/{ticker_val}?apikey={API_KEY}{params}"
     try:
-        r = requests.get(url, timeout=15)
-        if r.status_code == 200:
-            return r.json()
-        return None
-    except:
-        return None
+        r = requests.get(url, timeout=10)
+        if r.status_code == 429: return "LIMIT"
+        data = r.json()
+        return data if isinstance(data, list) and len(data) > 0 else None
+    except: return None
 
-# --- VMI 20-YEAR IV CALCULATOR (Excel Logic) ---
+# --- VMI 20-YEAR IV CALCULATOR (Exact Excel Logic) ---
 def calculate_vmi_iv(fcf, debt, cash, shares, beta):
-    # From Discount Rate Data [cite: 4]
+    # Data from 'Discount Rate Data' 
     rf = 0.03608 
     mrp = 0.02728
-    discount_rate = rf + (beta * mrp) # Formula: Rf + Beta * MRP 
+    discount_rate = rf + (beta * mrp) # Formula: Rf + Beta * MRP [cite: 1]
     
-    # 3-Stage Growth Rates from VMI IV Calculator 
+    # Growth Stages from VMI IV Calculator 
     g1, g2, g3 = 0.1748, 0.15, 0.04 # Yr 1-5, Yr 6-10, Yr 11-20
     
     total_pv = 0
@@ -53,26 +52,26 @@ def calculate_vmi_iv(fcf, debt, cash, shares, beta):
         else: growth = g3
         
         projected_fcf *= (1 + growth)
-        total_pv += projected_fcf / ((1 + discount_rate) ** year) # 
+        total_pv += projected_fcf / ((1 + discount_rate) ** year)
     
     if shares > 0:
-        # IV = (PV of Cash Flows - Total Debt + Cash) / Shares 
+        # IV = (PV of Cash Flows - Total Debt + Cash) / Shares [cite: 1]
         iv = (total_pv - debt + cash) / shares
         return round(iv, 2)
     return 0.0
 
 if run_btn:
     with st.spinner('Syncing VMI Algorithm...'):
-        # Sequential fetch to keep API stable
-        p_data = fetch_oracle("profile")
-        m_data = fetch_oracle("key-metrics-ttm")
-        b_data = fetch_oracle("balance-sheet-statement", "&limit=1")
-        h_data = fetch_oracle("historical-price-full", "&timeseries=250")
+        # Fetches
+        p_data = fetch_oracle("profile", ticker)
+        m_data = fetch_oracle("key-metrics-ttm", ticker)
+        b_data = fetch_oracle("balance-sheet-statement", ticker, "&limit=1")
+        h_data = fetch_oracle("historical-price-full", ticker, "&timeseries=250")
         
-        if p_data and isinstance(p_data, list):
-            p = p_data[0]
-            m = m_data[0] if m_data else {}
-            b = b_data[0] if b_data else {}
+        if p_data == "LIMIT":
+            st.error("🚦 Rate Limit Reached. Please wait 60s for your minute-credits to reset.")
+        elif p_data:
+            p, m, b = p_data[0], (m_data[0] if m_data else {}), (b_data[0] if b_data else {})
             
             tab_ov, tab_chart, tab_iv, tab_moat = st.tabs(["📊 Overview", "📈 Technical Chart", "🎯 20yr IV Model", "🛡️ AI Moat"])
 
@@ -106,15 +105,20 @@ if run_btn:
                     fig.add_trace(go.Scatter(x=df['date'], y=df['SMA50'], line=dict(color='orange', width=1), name="SMA 50"))
                     fig.add_trace(go.Scatter(x=df['date'], y=df['SMA200'], line=dict(color='red', width=1.5), name="SMA 200"))
                     fig.add_hline(y=df['low'].min(), line_dash="dash", line_color="green", annotation_text="Support")
-                    fig.update_layout(template="plotly_dark", height=600, margin=dict(l=10, r=10, t=10, b=10))
+                    fig.update_layout(template="plotly_dark", height=600)
                     st.plotly_chart(fig, use_container_width=True)
 
             with tab_iv:
-                vmi_iv = calculate_vmi_iv(m.get('freeCashFlowTTM', 0), b.get('totalDebt', 0), 
-                                         b.get('cashAndShortTermInvestments', 0), 
-                                         m.get('numberOfShares', p.get('mktCap', 0)/p.get('price', 1)), 
-                                         p.get('beta', 1.1))
+                # Calculating using user-provided Excel parameters 
+                fcf = m.get('freeCashFlowTTM', 0)
+                debt = b.get('totalDebt', 0)
+                cash = b.get('cashAndShortTermInvestments', 0)
+                shares = m.get('numberOfShares', p.get('mktCap', 0)/p.get('price', 1))
+                beta = p.get('beta', 1.1)
+                
+                vmi_iv = calculate_vmi_iv(fcf, debt, cash, shares, beta)
                 price = p.get('price', 0)
+                
                 iv_c1, iv_c2, iv_c3 = st.columns(3)
                 iv_c1.metric("Current Price", f"${price}")
                 iv_c2.metric("VMI 20yr Intrinsic Value", f"${vmi_iv}")
@@ -132,16 +136,16 @@ if run_btn:
                 with m1:
                     st.subheader("1. Brand Loyalty & Pricing Power")
                     st.write("Score: 10 / 10")
-                    st.write("Commanding premiums and sustained margins through brand dominance.")
+                    st.write("Dominant market position and pricing premium.")
                     st.subheader("2. High Barriers to Entry")
                     st.write("Score: 10 / 10")
-                    st.write("Proprietary software ecosystems and multi-billion dollar R&D moats.")
+                    st.write("Proprietary tech and massive R&D moats.")
                 with m2:
                     st.subheader("3. High Switching Costs")
                     st.write("Score: 10 / 10")
-                    st.write("Deep workflow integration making migration irrationally expensive.")
+                    st.write("Deep workflow integration creating user lock-in.")
                     st.subheader("4. Network Effects")
                     st.write("Score: 10 / 10")
-                    st.write("Developer networks create a self-reinforcing platform flywheel.")
+                    st.write("Developer ecosystems creating platform flywheels.")
         else:
             st.error("❌ Data search failed. Wait 60s for the API rate limit to reset.")
