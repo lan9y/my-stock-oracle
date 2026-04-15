@@ -24,9 +24,9 @@ st.markdown("""
 
 st.title("🔮 OraclePro™ VMI Terminal")
 
-# --- DATA PERSISTENCE ---
-if 'vmi_data' not in st.session_state:
-    st.session_state.vmi_data = None
+# --- DATA SESSION STATE (The Shield) ---
+if 'stock_oracle_cache' not in st.session_state:
+    st.session_state.stock_oracle_cache = None
 
 ticker = st.sidebar.text_input("SYMBOL", value="AAPL").upper().strip()
 run_btn = st.sidebar.button("EXECUTE VMI ANALYSIS")
@@ -45,37 +45,43 @@ def calculate_vmi_iv(fcf, debt, cash, shares, beta):
     return round((total_pv - debt + cash) / shares, 2) if shares > 0 else 0
 
 if run_btn:
-    st.session_state.vmi_data = None
-    with st.spinner(f'Initiating Sequential VMI Scan for {ticker}...'):
+    st.session_state.stock_oracle_cache = None # Clear old data
+    with st.spinner(f'Sequential Sync: Stay on this page for 10 seconds...'):
         try:
-            # We use 2.5s gaps to ensure the free API key stays "Polite"
+            # STEP 1: Profile
             p = requests.get(f"{BASE_URL}/profile/{ticker}?apikey={API_KEY}").json()
-            time.sleep(2.5)
+            time.sleep(3.0) # Long pause to satisfy the server gate
+            
+            # STEP 2: Metrics
             m = requests.get(f"{BASE_URL}/key-metrics-ttm/{ticker}?apikey={API_KEY}").json()
-            time.sleep(2.5)
+            time.sleep(3.0)
+            
+            # STEP 3: Ratios
             r = requests.get(f"{BASE_URL}/ratios-ttm/{ticker}?apikey={API_KEY}").json()
-            time.sleep(2.5)
+            time.sleep(3.0)
+            
+            # STEP 4: History
             h = requests.get(f"{BASE_URL}/historical-price-full/{ticker}?apikey={API_KEY}&timeseries=250").json()
 
             if p and isinstance(p, list):
-                st.session_state.vmi_data = {
+                st.session_state.stock_oracle_cache = {
                     "prof": p[0], "met": m[0] if m else {},
                     "rat": r[0] if r else {}, "hist": h
                 }
             else:
-                st.error("🚦 API Blocked. Please wait 60s for the rate limit to reset.")
+                st.error("🚦 API Gate Locked. Wait 60s and try again.")
         except:
-            st.error("Connection error. Ensure ticker is valid.")
+            st.error("Network sync failed. Please check ticker.")
 
 # --- RENDER DASHBOARD ---
-if st.session_state.vmi_data:
-    sd = st.session_state.vmi_data
+if st.session_state.stock_oracle_cache:
+    sd = st.session_state.stock_oracle_cache
     prof, met, rat, hist = sd["prof"], sd["met"], sd["rat"], sd["hist"]
 
     tab_ov, tab_chart, tab_iv, tab_moat = st.tabs(["📊 Overview", "📈 VMI Chart", "🎯 20yr IV Model", "🛡️ AI Moat"])
 
     with tab_ov:
-        # 1. MOAT STATUS (ROIC & Pricing Power Analysis)
+        # MOAT STATUS (Logic based on ROIC & Margin)
         roic = rat.get('returnOnCapitalEmployedTTM', 0)
         moat_status, moat_class = ("Wide Moat", "wide-moat") if roic > 0.18 else ("Narrow Moat", "narrow-moat") if roic > 0.09 else ("No Moat", "no-moat")
         
@@ -86,7 +92,7 @@ if st.session_state.vmi_data:
         with col_s:
             st.markdown(f'<div class="moat-tag {moat_class}">{moat_status}</div>', unsafe_allow_html=True)
 
-        # 2. SCORECARDS (StockOracle Style)
+        # SCORECARDS
         s1, s2, s3, s4, s5, s6 = st.columns(6)
         with s1: st.markdown('<div class="score-card"><div class="score-label">Predictability</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
         with s2: st.markdown(f'<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">{int(min(roic*100/2, 10))}/10</div></div>', unsafe_allow_html=True)
@@ -96,7 +102,6 @@ if st.session_state.vmi_data:
         with s6: st.markdown('<div class="score-card"><div class="score-label">Valuation</div><div class="score-value">6/10</div></div>', unsafe_allow_html=True)
 
         st.divider()
-        # 3. AI SEGMENT ANALYSIS (NVIDIA Example Style)
         st.subheader("Nature of Company & Segment Deep-Dive")
         st.write(prof.get('description'))
 
