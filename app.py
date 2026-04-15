@@ -67,4 +67,38 @@ if analyze_btn:
                 c4.metric("Beta", p.get('beta', 'N/A'))
 
             with tab_fin:
-                st.subheader("Core
+                st.subheader("Core Financial Health")
+                f1, f2 = st.columns(2)
+                f1.metric("Revenue per Share", f"${m.get('revenuePerShareTTM', 'N/A')}")
+                f2.metric("Net Income per Share", f"${m.get('netIncomePerShareTTM', 'N/A')}")
+                st.caption("Note: Detailed 10-K tables require Pro API access. Displaying TTM summaries.")
+
+            with tab_val:
+                st.subheader("OracleIQ™ Valuation Model")
+                eps = p.get('lastDiv', 0) if not p.get('eps') else p.get('eps')
+                price = p.get('price', 0)
+                
+                # Graham Formula logic
+                intrinsic = round(eps * (8.5 + 15), 2) if eps else round(price * 1.1, 2)
+                upside = round(((intrinsic - price) / price) * 100, 2)
+                
+                v1, v2 = st.columns(2)
+                v1.metric("Calculated Fair Value", f"${intrinsic}")
+                v2.metric("Margin of Safety", f"{upside}%", delta=f"{upside}%")
+                
+                if upside > 15:
+                    st.success("🟢 BULLISH: Asset is trading at a discount.")
+                else:
+                    st.warning("⚖️ NEUTRAL: Asset is near its Oracle Fair Value.")
+
+            with tab_ai:
+                st.subheader("🤖 OracleIQ AI Insights")
+                st.markdown(f"""
+                ### Analysis for {ticker}:
+                * **Moat Rating:** Based on {p.get('industry')} sector standards, this company holds a **{'Strong' if p.get('mktCap', 0) > 100e9 else 'Moderate'}** competitive position.
+                * **Risk Factor:** Current Beta of **{p.get('beta')}** indicates **{'High' if p.get('beta', 1) > 1.2 else 'Low'}** market volatility.
+                * **Verdict:** {'Accumulate' if upside > 10 else 'Hold'} for long-term fundamental growth.
+                """)
+
+        else:
+            st.error("❌ Data restricted for this ticker on the free 2026 plan. Try AAPL or NVDA.")
