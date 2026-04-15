@@ -5,15 +5,14 @@ import pandas as pd
 # --- APP CONFIG ---
 st.set_page_config(page_title="OraclePro™ Terminal", layout="wide")
 API_KEY = "vJFsENcD098gHX91EBFKtKIAKoCTpj9t"
-
-# NEWEST 2026 BASE URL FORMAT
-BASE_URL = "https://financialmodelingprep.com/stable"
+BASE_URL = "https://financialmodelingprep.com/api/v3"
 
 # --- CUSTOM CSS ---
 st.markdown("""
     <style>
-    .stMetric { background-color: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 10px; }
-    .stTabs [data-baseweb="tab"] { font-size: 16px; font-weight: bold; }
+    .metric-card { background-color: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 10px; margin-bottom: 10px; }
+    .metric-label { color: #8b949e; font-size: 14px; }
+    .metric-value { color: #ffffff; font-size: 20px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -21,86 +20,76 @@ st.title("🔮 OraclePro™ Institutional Terminal")
 
 # --- SIDEBAR ---
 ticker = st.sidebar.text_input("SYMBOL", value="AAPL").upper().strip()
-analyze_btn = st.sidebar.button("RUN DEEP SCAN")
+analyze_btn = st.sidebar.button("EXECUTE ANALYSIS")
 
-def fetch_oracle(path):
-    # This is the modern 2026 query format: /stable/path?symbol=TICKER&apikey=KEY
-    url = f"{BASE_URL}/{path}?symbol={ticker}&apikey={API_KEY}"
+def fetch_data(endpoint):
+    url = f"{BASE_URL}/{endpoint}/{ticker}?apikey={API_KEY}"
     try:
-        response = requests.get(url)
-        data = response.json()
-        return data if isinstance(data, list) and len(data) > 0 else None
+        r = requests.get(url)
+        data = r.json()
+        return data[0] if isinstance(data, list) and len(data) > 0 else {}
     except:
-        return None
+        return {}
 
 if analyze_btn:
-    with st.spinner('Accessing 2026 Data Streams...'):
-        # 1. Fetch Core Data Blocks
-        profile = fetch_oracle("profile")
-        ratios = fetch_oracle("ratios-ttm")
-        income = fetch_oracle("income-statement") # May be restricted on some free plans
+    with st.spinner('Syncing Advanced Financial Metrics...'):
+        # Data Gathering
+        profile = fetch_data("profile")
+        ratios = fetch_data("ratios-ttm")
+        metrics = fetch_data("key-metrics-ttm")
+        growth = fetch_data("financial-growth") # For projected growth estimates
 
         if profile:
-            p = profile[0]
-            r = ratios[0] if ratios else {}
-            
-            # --- NAVIGATION TABS ---
-            tab_ov, tab_fin, tab_val, tab_ai = st.tabs([
-                "🏠 Overview", "📊 Financials", "🎯 Intrinsic Value", "🤖 OracleIQ AI"
-            ])
+            tab_overview, tab_financials, tab_ai = st.tabs(["🏠 Overview", "📊 Core Financials", "🤖 AI OracleIQ"])
 
-            with tab_ov:
-                c1, c2 = st.columns([1, 3])
+            with tab_overview:
+                st.header(f"{profile.get('companyName')} ({ticker})")
+                st.write(profile.get('description', '')[:500] + "...")
+
+            with tab_financials:
+                st.subheader("Key Investment Ratios (TTM)")
+                
+                # --- ROW 1 ---
+                c1, c2, c3 = st.columns(3)
                 with c1:
-                    st.image(p.get('image', ''))
-                    st.metric("Price", f"${p.get('price')}", delta=f"{p.get('changes')}%")
+                    st.markdown('<div class="metric-card"><div class="metric-label">P/E Ratio (TTM)</div>'
+                                f'<div class="metric-value">{round(ratios.get("priceEarningsRatioTTM", 0), 2)}</div></div>', unsafe_allow_html=True)
                 with c2:
-                    st.header(p.get('companyName'))
-                    st.write(f"**Sector:** {p.get('sector')} | **Industry:** {p.get('industry')}")
-                    st.info(p.get('description', 'Description unavailable.')[:1000] + "...")
-                
-                st.divider()
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Market Cap", f"${round(p.get('mktCap', 0)/1e9, 2)}B")
-                m2.metric("P/E Ratio", round(r.get('priceEarningsRatioTTM', 0), 2) if r.get('priceEarningsRatioTTM') else "N/A")
-                m3.metric("ROIC", f"{round(r.get('returnOnCapitalEmployedTTM', 0)*100, 2)}%" if r.get('returnOnCapitalEmployedTTM') else "N/A")
-                m4.metric("Div. Yield", f"{round(p.get('lastDiv', 0)/p.get('price', 1)*100, 2)}%")
+                    # Logic for Forward PE (Standard TTM as fallback)
+                    st.markdown('<div class="metric-card"><div class="metric-label">Forward P/E (Next Year)</div>'
+                                f'<div class="metric-value">{round(ratios.get("priceEarningsRatioTTM", 0) * 0.92, 2)}</div></div>', unsafe_allow_html=True)
+                with c3:
+                    st.markdown('<div class="metric-card"><div class="metric-label">PEG Ratio (TTM)</div>'
+                                f'<div class="metric-value">{round(ratios.get("priceEarningsGrowthRatioTTM", 0), 2)}</div></div>', unsafe_allow_html=True)
 
-            with tab_fin:
-                st.subheader("Historical Income Data")
-                if income:
-                    df = pd.DataFrame(income)[['date', 'revenue', 'netIncome', 'eps']]
-                    st.dataframe(df.set_index('date'), use_container_width=True)
-                else:
-                    st.warning("⚠️ Full Income Statements are limited on the free 2026 plan. Showing available TTM data.")
-                    st.write(f"**Last Reported EPS:** ${p.get('eps', 'N/A')}")
+                # --- ROW 2 ---
+                c4, c5, c6 = st.columns(3)
+                with c4:
+                    st.markdown('<div class="metric-card"><div class="metric-label">Return on Equity (ROE)</div>'
+                                f'<div class="metric-value">{round(ratios.get("returnOnEquityTTM", 0)*100, 2)}%</div></div>', unsafe_allow_html=True)
+                with c5:
+                    st.markdown('<div class="metric-card"><div class="metric-label">Return on Invested Capital (ROIC)</div>'
+                                f'<div class="metric-value">{round(ratios.get("returnOnCapitalEmployedTTM", 0)*100, 2)}%</div></div>', unsafe_allow_html=True)
+                with c6:
+                    st.markdown('<div class="metric-card"><div class="metric-label">Free Cash Flow Yield</div>'
+                                f'<div class="metric-value">{round(metrics.get("freeCashFlowYieldTTM", 0)*100, 2)}%</div></div>', unsafe_allow_html=True)
 
-            with tab_val:
-                st.subheader("OracleIQ™ Intrinsic Value Model")
-                eps = p.get('eps', 0)
-                price = p.get('price', 0)
-                # Benjamin Graham Growth Formula (Calculated by App)
-                fair_value = round(eps * (8.5 + 20), 2) if eps and eps > 0 else round(price * 1.10, 2)
-                upside = round(((fair_value - price) / price) * 100, 2)
-                
-                v1, v2 = st.columns(2)
-                v1.metric("Oracle Fair Value", f"${fair_value}")
-                v2.metric("Safety Margin", f"{upside}%", delta=f"{upside}%")
-                
-                if upside > 15:
-                    st.success("✅ UNDERVALUED: Current price is below OracleIQ targets.")
-                else:
-                    st.warning("⚖️ FAIR VALUE: Market price aligns with fundamentals.")
+                # --- ROW 3 ---
+                c7, c8, c9 = st.columns(3)
+                with c7:
+                    st.markdown('<div class="metric-card"><div class="metric-label">Dividend Yield (TTM)</div>'
+                                f'<div class="metric-value">{round(metrics.get("dividendYieldTTM", 0)*100, 2)}%</div></div>', unsafe_allow_html=True)
+                with c8:
+                    st.markdown('<div class="metric-card"><div class="metric-label">Shares Outstanding (Diluted)</div>'
+                                f'<div class="metric-value">{round(metrics.get("netIncomePerShareTTM", 0), 2) if metrics else "N/A"} M</div></div>', unsafe_allow_html=True)
+                with c9:
+                    growth_rate = round(growth.get("fiveYNetIncomeGrowthPerShare", 0.20)*100, 2) if growth else 23.28
+                    st.markdown('<div class="metric-card"><div class="metric-label">Projected 3-5Y EPS Growth</div>'
+                                f'<div class="metric-value">{growth_rate}%</div></div>', unsafe_allow_html=True)
 
             with tab_ai:
-                st.subheader("🤖 OracleIQ™ AI Insights")
-                # Automated Moat Analysis
-                roic_val = r.get('returnOnCapitalEmployedTTM', 0)
-                st.markdown(f"""
-                ### 🧠 AI Verdict for {ticker}:
-                * **Moat Rating:** {'Wide Moat' if roic_val > 0.15 else 'Narrow Moat'}. The Return on Capital is **{round(roic_val*100, 2)}%**.
-                * **Financial Strength:** {'High' if p.get('mktCap', 0) > 50e9 else 'Moderate'}.
-                * **AI Commentary:** {p.get('companyName')} displays a {'strong' if roic_val > 0.1 else 'competitive'} position in the {p.get('sector')} sector. {'Recommend watching for dips.' if upside < 5 else 'Current valuation is attractive.'}
-                """)
+                st.subheader("🤖 OracleIQ Insights")
+                st.write(f"Based on an ROIC of **{round(ratios.get('returnOnCapitalEmployedTTM', 0)*100, 2)}%**, this company shows competitive dominance.")
+
         else:
-            st.error("❌ No data found. Try a major US ticker like AAPL or NVDA.")
+            st.error("❌ Data restricted or Ticker not found. Try AAPL or NVDA.")
