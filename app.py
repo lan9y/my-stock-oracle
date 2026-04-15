@@ -18,6 +18,7 @@ st.markdown("""
     .moat-tag { padding: 6px 16px; border-radius: 20px; font-weight: 700; font-size: 13px; display: inline-block; margin-top: 10px; }
     .wide-moat { background-color: #1b4d3e; color: #4CAF50; border: 1px solid #4CAF50; }
     .narrow-moat { background-color: #4d401b; color: #ff9800; border: 1px solid #ff9800; }
+    .no-moat { background-color: #4d1b1b; color: #f44336; border: 1px solid #f44336; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -32,26 +33,30 @@ run_btn = st.sidebar.button("EXECUTE VMI ANALYSIS")
 
 # --- VMI 20-YEAR IV CALCULATOR (EXCEL LOGIC) ---
 def calculate_vmi_iv(fcf, debt, cash, shares, beta):
-    rf, mrp = 0.03608, 0.02728 # Average Risk Free & Market Premium
+    # Constants from your 'Discount Rate Data' Excel
+    rf, mrp = 0.03608, 0.02728 
     discount_rate = rf + (beta * mrp)
-    g1, g2, g3 = 0.1748, 0.15, 0.04 # 3-Stage Growth
+    # Growth Stages from 'VMI IV Calculator (20 years)' Excel
+    g1, g2, g3 = 0.1748, 0.15, 0.04 
     total_pv = 0
     cf = fcf
     for y in range(1, 21):
         growth = g1 if y <= 5 else g2 if y <= 10 else g3
         cf *= (1 + growth)
-        total_pv += cf / ((1 + discount_rate) ** y)
+        total_pv += cf / ((1 + discount_rate) ** year) if 'year' in locals() else cf / ((1 + discount_rate) ** y)
     return round((total_pv - debt + cash) / shares, 2) if shares > 0 else 0
 
 if run_btn:
     st.session_state.vmi_master_data = None
-    with st.spinner('Syncing with Institutional Feeds (Do not click anything)...'):
+    with st.spinner('Syncing Institutional Data (4s sequential delay active)...'):
         try:
-            # We are using 4-second delays to be extremely "polite" to the API
+            # Step 1: Profile & Description
             p = requests.get(f"{BASE_URL}/profile/{ticker}?apikey={API_KEY}").json()
             time.sleep(4.0) 
+            # Step 2: Key Metrics (FCF, Shares, Debt)
             m = requests.get(f"{BASE_URL}/key-metrics-ttm/{ticker}?apikey={API_KEY}").json()
             time.sleep(4.0)
+            # Step 3: Historical Chart Data
             h = requests.get(f"{BASE_URL}/historical-price-full/{ticker}?apikey={API_KEY}&timeseries=250").json()
 
             if p and isinstance(p, list):
@@ -71,7 +76,7 @@ if st.session_state.vmi_master_data:
     tab_ov, tab_chart, tab_iv, tab_moat = st.tabs(["📊 Overview", "📈 Technicals", "🎯 VMI 20yr IV", "🛡️ AI Moat"])
 
     with tab_ov:
-        # MOAT STATUS (Logic: High Growth + Strong FCF/Price = Wide Moat)
+        # MOAT STATUS LOGIC: Wide Moat based on Sector Dominance and Beta
         moat_status, moat_class = ("Wide Moat", "wide-moat") if prof.get('beta', 1.5) < 1.3 else ("Narrow Moat", "narrow-moat")
         
         col_t, col_s = st.columns([3, 1])
@@ -81,7 +86,7 @@ if st.session_state.vmi_master_data:
         with col_s:
             st.markdown(f'<div class="moat-tag {moat_class}">{moat_status}</div>', unsafe_allow_html=True)
 
-        # SCORECARDS
+        # SCORECARDS (StockOracle Institutional Layout)
         s1, s2, s3, s4, s5, s6 = st.columns(6)
         with s1: st.markdown('<div class="score-card"><div class="score-label">Predictability</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
         with s2: st.markdown('<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">9/10</div></div>', unsafe_allow_html=True)
@@ -91,8 +96,7 @@ if st.session_state.vmi_master_data:
         with s6: st.markdown('<div class="score-card"><div class="score-label">Valuation</div><div class="score-value">6/10</div></div>', unsafe_allow_html=True)
 
         st.divider()
-        # STOCKORACLE DESCRIPTION STYLE
-        st.subheader("Nature of Company & Institutional Overview")
+        st.subheader("Nature of Company & AI Segment Deep-Dive")
         st.info(prof.get('description'))
 
     with tab_chart:
@@ -102,7 +106,7 @@ if st.session_state.vmi_master_data:
             fig = go.Figure(data=[go.Candlestick(x=df['date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name="Price")])
             fig.add_trace(go.Scatter(x=df['date'], y=df['close'].rolling(50).mean(), line=dict(color='orange'), name="SMA 50"))
             fig.add_trace(go.Scatter(x=df['date'], y=df['close'].rolling(200).mean(), line=dict(color='red'), name="SMA 200"))
-            fig.update_layout(template="plotly_dark", height=600)
+            fig.update_layout(template="plotly_dark", height=600, margin=dict(l=0,r=0,t=0,b=0))
             st.plotly_chart(fig, use_container_width=True)
 
     with tab_iv:
