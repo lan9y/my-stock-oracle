@@ -5,100 +5,102 @@ import pandas as pd
 # --- APP CONFIG ---
 st.set_page_config(page_title="OraclePro™ Terminal", layout="wide")
 API_KEY = "vJFsENcD098gHX91EBFKtKIAKoCTpj9t"
-# We use /stable/ for 2026 account compatibility
-BASE_URL = "https://financialmodelingprep.com/api/stable"
 
-# --- CUSTOM CSS FOR "STOCKORACLE" LOOK ---
+# NEWEST 2026 BASE URL FORMAT
+BASE_URL = "https://financialmodelingprep.com/stable"
+
+# --- CUSTOM CSS ---
 st.markdown("""
     <style>
-    .stMetric { background-color: #1e2130; border: 1px solid #4CAF50; padding: 10px; border-radius: 10px; }
-    .stButton>button { width: 100%; border-radius: 20px; background-color: #4CAF50; color: white; }
+    .stMetric { background-color: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 10px; }
+    .stTabs [data-baseweb="tab"] { font-size: 16px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🔮 OraclePro™ Institutional Terminal")
 
-# --- SIDEBAR CONTROL ---
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/2533/2533513.png", width=100)
+# --- SIDEBAR ---
 ticker = st.sidebar.text_input("SYMBOL", value="AAPL").upper().strip()
-analyze_btn = st.sidebar.button("EXECUTE ANALYSIS")
+analyze_btn = st.sidebar.button("RUN DEEP SCAN")
 
-def get_oracle_data(endpoint):
-    # Using the ?symbol= format required by 2026 stable endpoints
-    url = f"{BASE_URL}/{endpoint}?symbol={ticker}&apikey={API_KEY}"
+def fetch_oracle(path):
+    # This is the modern 2026 query format: /stable/path?symbol=TICKER&apikey=KEY
+    url = f"{BASE_URL}/{path}?symbol={ticker}&apikey={API_KEY}"
     try:
-        r = requests.get(url)
-        res = r.json()
-        return res if isinstance(res, list) and len(res) > 0 else None
+        response = requests.get(url)
+        data = response.json()
+        return data if isinstance(data, list) and len(data) > 0 else None
     except:
         return None
 
 if analyze_btn:
-    with st.spinner('Syncing with FactSet-Style Data feeds...'):
-        # Global Data Fetch
-        profile = get_oracle_data("profile")
-        # Fallback for Metrics if stable/key-metrics is restricted
-        metrics = get_oracle_data("key-metrics-ttm")
-        
+    with st.spinner('Accessing 2026 Data Streams...'):
+        # 1. Fetch Core Data Blocks
+        profile = fetch_oracle("profile")
+        ratios = fetch_oracle("ratios-ttm")
+        income = fetch_oracle("income-statement") # May be restricted on some free plans
+
         if profile:
             p = profile[0]
-            m = metrics[0] if metrics else {}
+            r = ratios[0] if ratios else {}
             
-            # --- DASHBOARD TABS ---
-            tab_main, tab_fin, tab_val, tab_ai = st.tabs([
+            # --- NAVIGATION TABS ---
+            tab_ov, tab_fin, tab_val, tab_ai = st.tabs([
                 "🏠 Overview", "📊 Financials", "🎯 Intrinsic Value", "🤖 OracleIQ AI"
             ])
 
-            with tab_main:
-                col1, col2 = st.columns([1, 2])
-                with col1:
+            with tab_ov:
+                c1, c2 = st.columns([1, 3])
+                with c1:
                     st.image(p.get('image', ''))
                     st.metric("Price", f"${p.get('price')}", delta=f"{p.get('changes')}%")
-                with col2:
+                with c2:
                     st.header(p.get('companyName'))
-                    st.write(f"**Industry:** {p.get('industry')} | **Exchange:** {p.get('exchangeShortName')}")
-                    st.info(p.get('description', 'Data summary unavailable.')[:800] + "...")
+                    st.write(f"**Sector:** {p.get('sector')} | **Industry:** {p.get('industry')}")
+                    st.info(p.get('description', 'Description unavailable.')[:1000] + "...")
                 
                 st.divider()
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Market Cap", f"${round(p.get('mktCap', 0)/1e9, 2)}B")
-                c2.metric("P/E Ratio", round(p.get('price', 0)/p.get('eps', 1), 2) if p.get('eps') else "N/A")
-                c3.metric("Volume", f"{p.get('volAvg', 'N/A')}")
-                c4.metric("Beta", p.get('beta', 'N/A'))
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Market Cap", f"${round(p.get('mktCap', 0)/1e9, 2)}B")
+                m2.metric("P/E Ratio", round(r.get('priceEarningsRatioTTM', 0), 2) if r.get('priceEarningsRatioTTM') else "N/A")
+                m3.metric("ROIC", f"{round(r.get('returnOnCapitalEmployedTTM', 0)*100, 2)}%" if r.get('returnOnCapitalEmployedTTM') else "N/A")
+                m4.metric("Div. Yield", f"{round(p.get('lastDiv', 0)/p.get('price', 1)*100, 2)}%")
 
             with tab_fin:
-                st.subheader("Core Financial Health")
-                f1, f2 = st.columns(2)
-                f1.metric("Revenue per Share", f"${m.get('revenuePerShareTTM', 'N/A')}")
-                f2.metric("Net Income per Share", f"${m.get('netIncomePerShareTTM', 'N/A')}")
-                st.caption("Note: Detailed 10-K tables require Pro API access. Displaying TTM summaries.")
+                st.subheader("Historical Income Data")
+                if income:
+                    df = pd.DataFrame(income)[['date', 'revenue', 'netIncome', 'eps']]
+                    st.dataframe(df.set_index('date'), use_container_width=True)
+                else:
+                    st.warning("⚠️ Full Income Statements are limited on the free 2026 plan. Showing available TTM data.")
+                    st.write(f"**Last Reported EPS:** ${p.get('eps', 'N/A')}")
 
             with tab_val:
-                st.subheader("OracleIQ™ Valuation Model")
-                eps = p.get('lastDiv', 0) if not p.get('eps') else p.get('eps')
+                st.subheader("OracleIQ™ Intrinsic Value Model")
+                eps = p.get('eps', 0)
                 price = p.get('price', 0)
-                
-                # Graham Formula logic
-                intrinsic = round(eps * (8.5 + 15), 2) if eps else round(price * 1.1, 2)
-                upside = round(((intrinsic - price) / price) * 100, 2)
+                # Benjamin Graham Growth Formula (Calculated by App)
+                fair_value = round(eps * (8.5 + 20), 2) if eps and eps > 0 else round(price * 1.10, 2)
+                upside = round(((fair_value - price) / price) * 100, 2)
                 
                 v1, v2 = st.columns(2)
-                v1.metric("Calculated Fair Value", f"${intrinsic}")
-                v2.metric("Margin of Safety", f"{upside}%", delta=f"{upside}%")
+                v1.metric("Oracle Fair Value", f"${fair_value}")
+                v2.metric("Safety Margin", f"{upside}%", delta=f"{upside}%")
                 
                 if upside > 15:
-                    st.success("🟢 BULLISH: Asset is trading at a discount.")
+                    st.success("✅ UNDERVALUED: Current price is below OracleIQ targets.")
                 else:
-                    st.warning("⚖️ NEUTRAL: Asset is near its Oracle Fair Value.")
+                    st.warning("⚖️ FAIR VALUE: Market price aligns with fundamentals.")
 
             with tab_ai:
-                st.subheader("🤖 OracleIQ AI Insights")
+                st.subheader("🤖 OracleIQ™ AI Insights")
+                # Automated Moat Analysis
+                roic_val = r.get('returnOnCapitalEmployedTTM', 0)
                 st.markdown(f"""
-                ### Analysis for {ticker}:
-                * **Moat Rating:** Based on {p.get('industry')} sector standards, this company holds a **{'Strong' if p.get('mktCap', 0) > 100e9 else 'Moderate'}** competitive position.
-                * **Risk Factor:** Current Beta of **{p.get('beta')}** indicates **{'High' if p.get('beta', 1) > 1.2 else 'Low'}** market volatility.
-                * **Verdict:** {'Accumulate' if upside > 10 else 'Hold'} for long-term fundamental growth.
+                ### 🧠 AI Verdict for {ticker}:
+                * **Moat Rating:** {'Wide Moat' if roic_val > 0.15 else 'Narrow Moat'}. The Return on Capital is **{round(roic_val*100, 2)}%**.
+                * **Financial Strength:** {'High' if p.get('mktCap', 0) > 50e9 else 'Moderate'}.
+                * **AI Commentary:** {p.get('companyName')} displays a {'strong' if roic_val > 0.1 else 'competitive'} position in the {p.get('sector')} sector. {'Recommend watching for dips.' if upside < 5 else 'Current valuation is attractive.'}
                 """)
-
         else:
-            st.error("❌ Data restricted for this ticker on the free 2026 plan. Try AAPL or NVDA.")
+            st.error("❌ No data found. Try a major US ticker like AAPL or NVDA.")
