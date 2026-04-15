@@ -19,85 +19,77 @@ st.markdown("""
     .wide-moat { background-color: #1b4d3e; color: #4CAF50; border: 1px solid #4CAF50; }
     .narrow-moat { background-color: #4d401b; color: #ff9800; border: 1px solid #ff9800; }
     .no-moat { background-color: #4d1b1b; color: #f44336; border: 1px solid #f44336; }
-    .moat-box { background-color: #0d1117; padding: 20px; border-radius: 10px; border-left: 5px solid #4CAF50; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🔮 OraclePro™ VMI Terminal")
 
-# --- DATA SESSION STATE ---
-if 'vmi_cache' not in st.session_state:
-    st.session_state.vmi_cache = {}
+# --- DATA SESSION STATE (Persistence Engine) ---
+if 'vmi_storage' not in st.session_state:
+    st.session_state.vmi_storage = {}
 
-# --- SIDEBAR CONTROL ---
+# --- SIDEBAR ---
 ticker = st.sidebar.text_input("SYMBOL", value="AAPL").upper().strip()
 run_btn = st.sidebar.button("EXECUTE VMI ANALYSIS")
 
-@st.cache_data(ttl=3600)
-def fetch_safe(endpoint, t, params=""):
+def fetch_with_delay(endpoint, t, params=""):
     url = f"{BASE_URL}/{endpoint}/{t}?apikey={API_KEY}{params}"
     try:
         r = requests.get(url, timeout=15)
         if r.status_code == 429: return "LIMIT"
         data = r.json()
-        return data if isinstance(data, list) and len(data) > 0 else (data if isinstance(data, dict) and data else None)
+        return data if (isinstance(data, list) and len(data) > 0) else None
     except: return None
 
-# --- VMI 20-YEAR IV CALCULATOR (Exact Logic from your Excel Tool) ---
+# --- VMI 20-YEAR IV CALCULATOR (Excel Logic) ---
 def calculate_vmi_iv(fcf, debt, cash, shares, beta):
-    # Parameters from 'Discount Rate Data.csv'
-    rf = 0.03608 # Rf Average 
-    mrp = 0.02728 # MRP Average 
+    rf, mrp = 0.03608, 0.02728 # Constants from Discount Rate Data.csv
     discount_rate = rf + (beta * mrp)
-    
-    # Growth Stages from 'VMI IV Calculator (20 years).csv'
-    # Yr 1-5: 17.48% | Yr 6-10: 15% | Yr 11-20: 4% 
-    g1, g2, g3 = 0.1748, 0.15, 0.04 
+    g1, g2, g3 = 0.1748, 0.15, 0.04 # 3-Stage Growth Rates
     
     total_pv = 0
-    temp_fcf = fcf
-    for year in range(1, 21):
-        growth = g1 if year <= 5 else g2 if year <= 10 else g3
-        temp_fcf *= (1 + growth)
-        total_pv += temp_fcf / ((1 + discount_rate) ** year)
+    cf = fcf
+    for y in range(1, 21):
+        growth = g1 if y <= 5 else g2 if y <= 10 else g3
+        cf *= (1 + growth)
+        total_pv += cf / ((1 + discount_rate) ** y)
     
-    iv = (total_pv - debt + cash) / (shares if shares > 0 else 1)
-    return round(iv, 2)
+    return round((total_pv - debt + cash) / shares, 2) if shares > 0 else 0
 
 if run_btn:
-    with st.spinner(f'Consulting OracleIQ for {ticker}...'):
-        # Step-by-step fetch with 1.5s pauses to protect API health
-        p_raw = fetch_safe("profile", ticker)
+    with st.spinner(f'Sequential Sync for {ticker}...'):
+        # Step-by-step fetch with 1.5s delay to bypass "Burst" filters
+        p_raw = fetch_with_delay("profile", ticker)
         time.sleep(1.5)
-        m_raw = fetch_safe("key-metrics-ttm", ticker)
+        m_raw = fetch_with_delay("key-metrics-ttm", ticker)
         time.sleep(1.5)
-        r_raw = fetch_safe("ratios-ttm", ticker)
+        r_raw = fetch_with_delay("ratios-ttm", ticker)
         time.sleep(1.5)
-        h_raw = fetch_safe("historical-price-full", ticker, "&timeseries=250")
+        h_raw = requests.get(f"{BASE_URL}/historical-price-full/{ticker}?apikey={API_KEY}&timeseries=250").json()
 
-        # DEFENSIVE DATA STORAGE (Prevents KeyError)
-        if p_raw and isinstance(p_raw, list):
-            st.session_state.vmi_cache[ticker] = {
+        if p_raw == "LIMIT":
+            st.error("🚦 API Speed Limit Hit. Wait 60s for the gate to reset.")
+        elif p_raw:
+            st.session_state.vmi_storage[ticker] = {
                 "p": p_raw[0],
-                "m": m_raw[0] if m_raw and len(m_raw) > 0 else {},
-                "r": r_raw[0] if r_raw and len(r_raw) > 0 else {},
+                "m": m_raw[0] if m_raw else {},
+                "r": r_raw[0] if r_raw else {},
                 "h": h_raw
             }
         else:
-            st.error("❌ Data search failed or restricted. Wait 60s for the API rate limit to reset.")
+            st.error("❌ Symbol restricted or invalid. Try major US tickers.")
 
-# --- RENDER DASHBOARD IF DATA EXISTS ---
-if ticker in st.session_state.vmi_cache:
-    data = st.session_state.vmi_cache[ticker]
+# --- DISPLAY ENGINE ---
+if ticker in st.session_state.vmi_storage:
+    data = st.session_state.vmi_storage[ticker]
     p, m, r, h = data["p"], data["m"], data["r"], data["h"]
 
     tab_ov, tab_chart, tab_iv, tab_moat = st.tabs(["📊 Overview", "📈 Technical Chart", "🎯 20yr IV Model", "🛡️ AI Moat"])
 
     with tab_ov:
-        # MOAT CLASSIFIER (ROIC-based)
+        # MOAT LOGIC (Quantitative ROIC analysis)
         roic = r.get('returnOnCapitalEmployedTTM', 0)
-        moat_status, moat_class = ("Wide Moat", "wide-moat") if roic > 0.15 else \
-                                   ("Narrow Moat", "narrow-moat") if roic > 0.08 else ("No Moat", "no-moat")
+        moat_status, moat_class = ("Wide Moat", "wide-moat") if roic > 0.18 else ("Narrow Moat", "narrow-moat") if roic > 0.09 else ("No Moat", "no-moat")
         
         col_t, col_s = st.columns([3, 1])
         with col_t:
@@ -106,7 +98,6 @@ if ticker in st.session_state.vmi_cache:
         with col_s:
             st.markdown(f'<div class="moat-tag {moat_class}">{moat_status}</div>', unsafe_allow_html=True)
 
-        # SCORECARDS (Visual from StockOracle Screenshot)
         s1, s2, s3, s4, s5, s6 = st.columns(6)
         with s1: st.markdown('<div class="score-card"><div class="score-label">Predictability</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
         with s2: st.markdown(f'<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">{int(min(roic*100/2, 10))}/10</div></div>', unsafe_allow_html=True)
@@ -116,21 +107,16 @@ if ticker in st.session_state.vmi_cache:
         with s6: st.markdown('<div class="score-card"><div class="score-label">Valuation</div><div class="score-value">6/10</div></div>', unsafe_allow_html=True)
 
         st.divider()
-        st.subheader("Nature of Company & AI Summary")
-        st.write(p.get('description', 'Fundamental summary loading...'))
+        st.subheader("Nature of Company & Segment Analysis")
+        st.write(p.get('description', 'Loading segment details...'))
 
     with tab_chart:
         if h and 'historical' in h:
-            df = pd.DataFrame(h['historical'])
+            df = pd.DataFrame(h['historical']).sort_values('date')
             df['date'] = pd.to_datetime(df['date'])
-            df = df.sort_values('date')
-            df['SMA50'] = df['close'].rolling(50).mean()
-            df['SMA200'] = df['close'].rolling(200).mean()
-            
             fig = go.Figure(data=[go.Candlestick(x=df['date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name="Price")])
-            fig.add_trace(go.Scatter(x=df['date'], y=df['SMA50'], line=dict(color='orange'), name="SMA 50"))
-            fig.add_trace(go.Scatter(x=df['date'], y=df['SMA200'], line=dict(color='red'), name="SMA 200"))
-            fig.add_hline(y=df['low'].min(), line_dash="dash", line_color="green", annotation_text="Support")
+            fig.add_trace(go.Scatter(x=df['date'], y=df['close'].rolling(50).mean(), line=dict(color='orange'), name="SMA 50"))
+            fig.add_trace(go.Scatter(x=df['date'], y=df['close'].rolling(200).mean(), line=dict(color='red'), name="SMA 200"))
             fig.update_layout(template="plotly_dark", height=600)
             st.plotly_chart(fig, use_container_width=True)
 
@@ -139,13 +125,7 @@ if ticker in st.session_state.vmi_cache:
         shares = m.get('numberOfSharesTTM', (p.get('mktCap', 0)/price))
         iv = calculate_vmi_iv(m.get('freeCashFlowTTM', 0), m.get('totalDebtTTM', 0), m.get('cashAndShortTermInvestmentsTTM', 0), shares, p.get('beta', 1.1))
         
-        iv1, iv2, iv3 = st.columns(3)
-        iv1.metric("Current Price", f"${price}")
-        iv2.metric("VMI 20yr IV", f"${iv}")
-        if price > 0: iv3.metric("Margin of Safety", f"{round(((iv-price)/price)*100, 2)}%")
-
-    with tab_moat:
-        st.header(f"OracleIQ™ AI Moat Analysis")
-        st.markdown(f'<div class="moat-box"><h3>{moat_status} Status</h3><p>Based on Quantitative ROIC analysis ({round(roic*100,1)}%) and pricing power stability.</p></div>', unsafe_allow_html=True)
-        st.write("**Brand & Pricing Power:** Synonymous with industry standards; commanding premium margins.")
-        st.write("**High Barriers to Entry:** Proprietary technology stacks and massive R&D moats.")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Current Price", f"${price}")
+        c2.metric("VMI 20yr IV", f"${iv}")
+        if price > 0: c3.metric("Margin of Safety", f"{round(((iv-price)/price)*100, 2)}%")
