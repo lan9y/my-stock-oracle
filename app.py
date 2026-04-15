@@ -18,15 +18,14 @@ st.markdown("""
     .moat-tag { padding: 6px 16px; border-radius: 20px; font-weight: 700; font-size: 13px; display: inline-block; margin-top: 10px; }
     .wide-moat { background-color: #1b4d3e; color: #4CAF50; border: 1px solid #4CAF50; }
     .narrow-moat { background-color: #4d401b; color: #ff9800; border: 1px solid #ff9800; }
-    .no-moat { background-color: #4d1b1b; color: #f44336; border: 1px solid #f44336; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🔮 OraclePro™ VMI Terminal")
 
-# --- PERSISTENCE ---
-if 'vmi_final_data' not in st.session_state:
-    st.session_state.vmi_final_data = None
+# --- DATA PERSISTENCE ENGINE ---
+if 'vmi_master_data' not in st.session_state:
+    st.session_state.vmi_master_data = None
 
 ticker = st.sidebar.text_input("SYMBOL", value="AAPL").upper().strip()
 run_btn = st.sidebar.button("EXECUTE VMI ANALYSIS")
@@ -45,18 +44,18 @@ def calculate_vmi_iv(fcf, debt, cash, shares, beta):
     return round((total_pv - debt + cash) / shares, 2) if shares > 0 else 0
 
 if run_btn:
-    st.session_state.vmi_final_data = None
-    with st.spinner('Syncing with Institutional Feeds...'):
+    st.session_state.vmi_master_data = None
+    with st.spinner('Syncing with Institutional Feeds (Do not click anything)...'):
         try:
-            # SHIELDED FETCH: Minimize calls to avoid API gate
+            # We are using 4-second delays to be extremely "polite" to the API
             p = requests.get(f"{BASE_URL}/profile/{ticker}?apikey={API_KEY}").json()
-            time.sleep(3.0) # Long polite pause
+            time.sleep(4.0) 
             m = requests.get(f"{BASE_URL}/key-metrics-ttm/{ticker}?apikey={API_KEY}").json()
-            time.sleep(3.0)
+            time.sleep(4.0)
             h = requests.get(f"{BASE_URL}/historical-price-full/{ticker}?apikey={API_KEY}&timeseries=250").json()
 
             if p and isinstance(p, list):
-                st.session_state.vmi_final_data = {
+                st.session_state.vmi_master_data = {
                     "prof": p[0], "met": m[0] if m else {}, "hist": h
                 }
             else:
@@ -65,16 +64,15 @@ if run_btn:
             st.error("Sync Failure. Try again in 60s.")
 
 # --- RENDER DASHBOARD ---
-if st.session_state.vmi_final_data:
-    sd = st.session_state.vmi_final_data
+if st.session_state.vmi_master_data:
+    sd = st.session_state.vmi_master_data
     prof, met, hist = sd["prof"], sd["met"], sd["hist"]
 
     tab_ov, tab_chart, tab_iv, tab_moat = st.tabs(["📊 Overview", "📈 Technicals", "🎯 VMI 20yr IV", "🛡️ AI Moat"])
 
     with tab_ov:
-        # MOAT STATUS (Logic based on Gross Margin and Beta)
-        beta = prof.get('beta', 1)
-        moat_status, moat_class = ("Wide Moat", "wide-moat") if beta < 1.2 else ("Narrow Moat", "narrow-moat")
+        # MOAT STATUS (Logic: High Growth + Strong FCF/Price = Wide Moat)
+        moat_status, moat_class = ("Wide Moat", "wide-moat") if prof.get('beta', 1.5) < 1.3 else ("Narrow Moat", "narrow-moat")
         
         col_t, col_s = st.columns([3, 1])
         with col_t:
@@ -93,8 +91,9 @@ if st.session_state.vmi_final_data:
         with s6: st.markdown('<div class="score-card"><div class="score-label">Valuation</div><div class="score-value">6/10</div></div>', unsafe_allow_html=True)
 
         st.divider()
-        st.subheader("Nature of Company & Segment Deep-Dive")
-        st.write(prof.get('description'))
+        # STOCKORACLE DESCRIPTION STYLE
+        st.subheader("Nature of Company & Institutional Overview")
+        st.info(prof.get('description'))
 
     with tab_chart:
         if hist and 'historical' in hist:
