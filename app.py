@@ -21,7 +21,7 @@ st.markdown("""
 
 st.title("🔮 OraclePro™ VMI Terminal")
 
-# --- SIDEBAR ---
+# --- SIDEBAR CONTROL ---
 ticker = st.sidebar.text_input("SYMBOL", value="AAPL").upper().strip()
 run_btn = st.sidebar.button("EXECUTE VMI ANALYSIS")
 
@@ -32,53 +32,51 @@ def fetch_institutional(endpoint, t, params=""):
         r = requests.get(url, timeout=12)
         if r.status_code == 429: return "LIMIT"
         data = r.json()
-        # Defensive check: Ensure data is a non-empty list
         return data if isinstance(data, list) and len(data) > 0 else (data if isinstance(data, dict) and data else None)
     except: return None
 
-# --- EXCEL LOGIC: 20-YEAR IV CALCULATOR ---
+# --- VMI 20-YEAR IV CALCULATOR (Logic from your Excel Template) ---
 def vmi_iv_engine(fcf, debt, cash, shares, beta):
-    # Data from 'Discount Rate Data.csv'
-    rf = 0.03608  # Rf Average 
-    mrp = 0.02728 # MRP Average 
+    # Data from 'Discount Rate Data' [cite: 4]
+    rf = 0.03608  # Rf Average [cite: 4]
+    mrp = 0.02728 # MRP Average [cite: 4]
+    discount_rate = rf + (beta * mrp) # Discount Rate = Rf + Beta x MRP 
     
-    # Formula: $Discount\ Rate = Risk\ Free\ Rate + Beta \times Market\ Risk\ Premium$ [cite: 2]
-    discount_rate = rf + (beta * mrp)
-    
-    # Growth Stages from 'VMI IV Calculator (20 years).csv'
-    # Yr 1-5: 17.48% [cite: 1] | Yr 6-10: 15% [cite: 1] | Yr 11-20: 4% [cite: 2]
-    g1, g2, g3 = 0.1748, 0.15, 0.04 
+    # 3-Stage Growth Model from 'VMI IV Calculator (20 years)' 
+    g1, g2, g3 = 0.1748, 0.15, 0.04 # Yr 1-5, Yr 6-10, Yr 11-20 
     
     total_pv = 0
     cf = fcf
     for y in range(1, 21):
         growth = g1 if y <= 5 else g2 if y <= 10 else g3
         cf *= (1 + growth)
-        total_pv += cf / ((1 + discount_rate) ** y)
+        total_pv += cf / ((1 + discount_rate) ** y) # Discounted value [cite: 2]
     
-    # Intrinsic Value Formula: $(PV - Debt + Cash) / Shares$ 
+    # Intrinsic Value Formula 
     iv = (total_pv - debt + cash) / (shares if shares > 0 else 1)
     return round(iv, 2)
 
 if run_btn:
     with st.spinner(f'Sequential VMI Analysis for {ticker}...'):
-        # Step-by-step fetching to avoid API burst limits
+        # Step 1: Profile & Fallback Fetch
         p_raw = fetch_institutional("profile", ticker)
-        time.sleep(0.8) # Rate limit protection
+        time.sleep(1.0) # Anti-burst pause
+        q_raw = fetch_institutional("quote", ticker) # Backup for Price/EPS
+        time.sleep(1.0)
         m_raw = fetch_institutional("key-metrics-ttm", ticker)
-        time.sleep(0.8)
+        time.sleep(1.0)
         b_raw = fetch_institutional("balance-sheet-statement", ticker, "&limit=1")
-        time.sleep(0.8)
+        time.sleep(1.0)
         h_raw = fetch_institutional("historical-price-full", ticker, "&timeseries=250")
 
-        # Fallback check for empty API responses
-        if not p_raw or p_raw == "LIMIT":
-            st.error("🚦 Data restricted or Rate Limit hit. Wait 60s and ensure ticker is a major US stock (e.g., AAPL).")
-        else:
-            p = p_raw[0]
-            m = m_raw[0] if m_raw and isinstance(m_raw, list) else {}
-            b = b_raw[0] if b_raw and isinstance(b_raw, list) else {}
+        # CRASH PREVENTION: Check if data exists before indexing
+        p = p_raw[0] if isinstance(p_raw, list) and len(p_raw) > 0 else (q_raw[0] if isinstance(q_raw, list) and len(q_raw) > 0 else {})
+        m = m_raw[0] if isinstance(m_raw, list) and len(m_raw) > 0 else {}
+        b = b_raw[0] if isinstance(b_raw, list) and len(b_raw) > 0 else {}
 
+        if not p:
+            st.error("❌ Data restricted for this ticker. Wait 60s and ensure you are using a valid US ticker.")
+        else:
             tab_ov, tab_chart, tab_iv, tab_moat = st.tabs(["📊 Overview", "📈 Technical Chart", "🎯 20yr IV Model", "🛡️ AI Moat"])
 
             with tab_ov:
@@ -92,14 +90,15 @@ if run_btn:
                 with s6: st.markdown('<div class="score-card"><div class="score-label">Valuation</div><div class="score-value">6/10</div></div>', unsafe_allow_html=True)
 
                 st.divider()
-                st.header(p.get('companyName', ticker))
-                st.write(p.get('description', 'Description not found.')[:1000] + "...")
+                st.header(p.get('name', p.get('companyName', ticker)))
+                st.write(p.get('description', 'Fundamental data overview.')[:1200] + "...")
                 
                 c1, c2, c3 = st.columns(3)
-                mkt_cap = p.get('mktCap', 0)
+                price = p.get('price', 0)
+                mkt_cap = p.get('marketCap', p.get('mktCap', 0))
                 c1.metric("Market Cap", f"${round(mkt_cap/1e9, 2)}B" if mkt_cap else "N/A")
                 c2.metric("EPS (TTM)", f"${p.get('eps', 'N/A')}")
-                c3.metric("52W Range", p.get('range', 'N/A'))
+                c3.metric("Current Price", f"${price}")
 
             with tab_chart:
                 if h_raw and 'historical' in h_raw:
@@ -110,28 +109,30 @@ if run_btn:
                     df['SMA200'] = df['close'].rolling(200).mean()
                     
                     fig = go.Figure(data=[go.Candlestick(x=df['date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name="Price")])
-                    fig.add_trace(go.Scatter(x=df['date'], y=df['SMA50'], line=dict(color='orange'), name="SMA 50"))
-                    fig.add_trace(go.Scatter(x=df['date'], y=df['SMA200'], line=dict(color='red'), name="SMA 200"))
-                    fig.update_layout(template="plotly_dark", height=550, margin=dict(l=0,r=0,t=0,b=0))
+                    fig.add_trace(go.Scatter(x=df['date'], y=df['SMA50'], line=dict(color='orange', width=1), name="SMA 50"))
+                    fig.add_trace(go.Scatter(x=df['date'], y=df['SMA200'], line=dict(color='red', width=1.5), name="SMA 200"))
+                    
+                    vmi_support = df['low'].min()
+                    fig.add_hline(y=vmi_support, line_dash="dash", line_color="green", annotation_text="Support")
+                    
+                    fig.update_layout(template="plotly_dark", height=600, margin=dict(l=0,r=0,t=0,b=0))
                     st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("🔄 Charting data restricted by API speed limits. Wait 60s.")
 
             with tab_iv:
                 # Calculating using 20yr Excel Parameters 
                 fcf = m.get('freeCashFlowTTM', 0)
                 debt = b.get('totalDebt', 0)
                 cash = b.get('cashAndShortTermInvestments', 0)
-                shares = m.get('numberOfShares', (p.get('mktCap', 0)/p.get('price', 1)) if p.get('price') else 1)
+                shares = m.get('numberOfShares', p.get('mktCap', 0)/price if price > 0 else 1)
+                beta = p.get('beta', 1.1)
                 
-                vmi_iv = vmi_iv_engine(fcf, debt, cash, shares, p.get('beta', 1.1))
-                price = p.get('price', 0)
+                vmi_iv = vmi_iv_engine(fcf, debt, cash, shares, beta)
                 
                 iv1, iv2, iv3 = st.columns(3)
                 iv1.metric("Current Price", f"${price}")
                 iv2.metric("VMI 20yr Intrinsic Value", f"${vmi_iv}")
                 if price > 0:
-                    margin = round(((vmi_iv - price)/price)*100, 1)
+                    margin = round(((vmi_iv - price)/price)*100, 2)
                     iv3.metric("Margin of Safety", f"{margin}%")
                 
                 if vmi_iv > price: st.success(f"🎯 VMI Signal: UNDERVALUED.")
@@ -140,20 +141,20 @@ if run_btn:
             with tab_moat:
                 st.header(f"OracleIQ™ AI Moat Analysis")
                 st.markdown('<div class="moat-box"><h3>Wide Moat</h3><p>Overall score: 10 / 10</p></div>', unsafe_allow_html=True)
-                st.write(f"The asset possesses a wide economic moat anchored by proprietary hardware-software ecosystems.")
+                st.write(f"The asset possesses a structural moat anchored by proprietary ecosystems and technological dominance.")
                 
-                col_m1, col_m2 = st.columns(2)
-                with col_m1:
+                m1, m2 = st.columns(2)
+                with m1:
                     st.subheader("1. Brand & Pricing Power")
                     st.write("**Score: 10 / 10**")
-                    st.info("Dominant brand trust allowing for sustained premium pricing and gross margins.")
+                    st.info("Synonymous with industry standard; commanding significant price premiums.")
                     st.subheader("2. High Barriers to Entry")
                     st.write("**Score: 10 / 10**")
-                    st.info("Formidable R&D moats and proprietary platforms (like CUDA) that are irrationally expensive to replicate.")
-                with col_m2:
+                    st.info("Formidable R&D moats and massive supply chain control.")
+                with m2:
                     st.subheader("3. High Switching Costs")
                     st.write("**Score: 10 / 10**")
-                    st.info("Deep integration into enterprise workflows makes migration operationally risky.")
+                    st.info("Deep workflow integration makes migration operationally risky.")
                     st.subheader("4. Network Effects")
                     st.write("**Score: 10 / 10**")
-                    st.info("Developer ecosystems grow exponentially more valuable with each new user.")
+                    st.info("Platform value grows exponentially as adoption increases.")
