@@ -35,22 +35,24 @@ def fetch_institutional(endpoint, t, params=""):
         return data if isinstance(data, list) and len(data) > 0 else (data if isinstance(data, dict) and data else None)
     except: return None
 
-# --- VMI 20-YEAR IV CALCULATOR (Logic from your Excel Template) ---
+# --- VMI 20-YEAR IV CALCULATOR (Logic from PP VMI Tools) ---
 def vmi_iv_engine(fcf, debt, cash, shares, beta):
-    # Data from 'Discount Rate Data' [cite: 4]
+    # Constants from your Excel 'Discount Rate Data' [cite: 1, 4]
     rf = 0.03608  # Rf Average [cite: 4]
     mrp = 0.02728 # MRP Average [cite: 4]
-    discount_rate = rf + (beta * mrp) # Discount Rate = Rf + Beta x MRP 
+    discount_rate = rf + (beta * mrp) # Formula: Rf + Beta x MRP [cite: 1, 4]
     
     # 3-Stage Growth Model from 'VMI IV Calculator (20 years)' 
-    g1, g2, g3 = 0.1748, 0.15, 0.04 # Yr 1-5, Yr 6-10, Yr 11-20 
+    g1 = 0.1748 # Yr 1-5 
+    g2 = 0.15   # Yr 6-10 
+    g3 = 0.04   # Yr 11-20 
     
     total_pv = 0
     cf = fcf
     for y in range(1, 21):
         growth = g1 if y <= 5 else g2 if y <= 10 else g3
         cf *= (1 + growth)
-        total_pv += cf / ((1 + discount_rate) ** y) # Discounted value [cite: 2]
+        total_pv += cf / ((1 + discount_rate) ** y) # Sum of Discounted FCF [cite: 1, 3]
     
     # Intrinsic Value Formula 
     iv = (total_pv - debt + cash) / (shares if shares > 0 else 1)
@@ -58,10 +60,10 @@ def vmi_iv_engine(fcf, debt, cash, shares, beta):
 
 if run_btn:
     with st.spinner(f'Sequential VMI Analysis for {ticker}...'):
-        # Step 1: Profile & Fallback Fetch
+        # Step 1: Sequential Fetch with Defensive Delays to avoid Rate Limits
         p_raw = fetch_institutional("profile", ticker)
-        time.sleep(1.0) # Anti-burst pause
-        q_raw = fetch_institutional("quote", ticker) # Backup for Price/EPS
+        time.sleep(1.0)
+        q_raw = fetch_institutional("quote", ticker) # Fallback source for basic data
         time.sleep(1.0)
         m_raw = fetch_institutional("key-metrics-ttm", ticker)
         time.sleep(1.0)
@@ -69,7 +71,7 @@ if run_btn:
         time.sleep(1.0)
         h_raw = fetch_institutional("historical-price-full", ticker, "&timeseries=250")
 
-        # CRASH PREVENTION: Check if data exists before indexing
+        # CRASH PREVENTION: Defensive checks to ensure data is present 
         p = p_raw[0] if isinstance(p_raw, list) and len(p_raw) > 0 else (q_raw[0] if isinstance(q_raw, list) and len(q_raw) > 0 else {})
         m = m_raw[0] if isinstance(m_raw, list) and len(m_raw) > 0 else {}
         b = b_raw[0] if isinstance(b_raw, list) and len(b_raw) > 0 else {}
@@ -80,7 +82,7 @@ if run_btn:
             tab_ov, tab_chart, tab_iv, tab_moat = st.tabs(["📊 Overview", "📈 Technical Chart", "🎯 20yr IV Model", "🛡️ AI Moat"])
 
             with tab_ov:
-                # SCORECARDS (Visual from StockOracle Screenshot)
+                # SCORECARDS (StockOracle Visual Styles)
                 s1, s2, s3, s4, s5, s6 = st.columns(6)
                 with s1: st.markdown('<div class="score-card"><div class="score-label">Predictability</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
                 with s2: st.markdown('<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">9/10</div></div>', unsafe_allow_html=True)
@@ -112,6 +114,7 @@ if run_btn:
                     fig.add_trace(go.Scatter(x=df['date'], y=df['SMA50'], line=dict(color='orange', width=1), name="SMA 50"))
                     fig.add_trace(go.Scatter(x=df['date'], y=df['SMA200'], line=dict(color='red', width=1.5), name="SMA 200"))
                     
+                    # Support Line (VMI Manual Calc)
                     vmi_support = df['low'].min()
                     fig.add_hline(y=vmi_support, line_dash="dash", line_color="green", annotation_text="Support")
                     
@@ -119,7 +122,7 @@ if run_btn:
                     st.plotly_chart(fig, use_container_width=True)
 
             with tab_iv:
-                # Calculating using 20yr Excel Parameters 
+                # Calculating using 20yr Excel Parameters from uploaded tools
                 fcf = m.get('freeCashFlowTTM', 0)
                 debt = b.get('totalDebt', 0)
                 cash = b.get('cashAndShortTermInvestments', 0)
