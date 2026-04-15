@@ -4,16 +4,16 @@ import requests
 # --- APP SETUP ---
 st.set_page_config(page_title="StockOracle AI", layout="wide")
 
-# Your verified 2026 API Key
+# Your Verified API Key
 API_KEY = "vJFsENcD098gHX91EBFKtKIAKoCTpj9t" 
 
-# THE NEWEST 2026 STABLE URL
-BASE_URL = "https://financialmodelingprep.com/api/stable"
+# THE ONLY 2026 WORKING BASE URL (Notice it's not 'api.financial...')
+BASE_URL = "https://financialmodelingprep.com/stable"
 
 st.title("🔮 StockOracle™ Terminal")
-st.write("2026 Institutional Analysis Engine")
+st.write("2026 Institutional Analysis | Using Modern Stable Endpoints")
 
-ticker_input = st.text_input("Enter Ticker Symbol (e.g., AAPL, NVDA, MSFT)", value="AAPL")
+ticker_input = st.text_input("Enter Ticker Symbol (e.g., AAPL, NVDA, TSLA)", value="AAPL")
 
 if st.button("Analyze Now"):
     ticker = ticker_input.upper().strip()
@@ -21,16 +21,17 @@ if st.button("Analyze Now"):
         st.warning("Please enter a symbol.")
     else:
         with st.spinner(f'Fetching 2026 Data for {ticker}...'):
-            # This is the precise format FMP now requires: /stable/profile?symbol=TICKER
+            # THE 2026 SECRET: Use the /stable/ path with ?symbol= parameter
             url = f"{BASE_URL}/profile?symbol={ticker}&apikey={API_KEY}"
             
             try:
                 response = requests.get(url)
                 data = response.json()
                 
-                # Check for Legacy or Limit errors in the response
+                # Check for the 'Legacy' error in the dictionary response
                 if isinstance(data, dict) and "Error Message" in data:
                     st.error(f"🚫 API Issue: {data.get('Error Message')}")
+                    st.info("The API is still flagging this as a legacy request. Double-check your GitHub save.")
                 
                 # Check for successful data list
                 elif isinstance(data, list) and len(data) > 0:
@@ -59,7 +60,7 @@ if st.button("Analyze Now"):
                     st.success(f"Analysis Complete for {ticker}.")
                     
                 else:
-                    st.error(f"❌ Ticker '{ticker}' not found. Note: Free plans usually support US stocks only (NYSE/NASDAQ).")
+                    st.error(f"❌ Ticker '{ticker}' not found. Note: Free plans usually support US stocks only.")
                     
             except Exception as e:
                 st.error("⚠️ Connection Glitch. Please try hitting Analyze again.")
