@@ -28,25 +28,26 @@ run_btn = st.sidebar.button("EXECUTE VMI SCAN")
 def fetch_oracle(endpoint, params=""):
     url = f"{BASE_URL}/{endpoint}/{ticker}?apikey={API_KEY}{params}"
     try:
-        r = requests.get(url, timeout=10)
-        data = r.json()
-        return data if isinstance(data, list) and len(data) > 0 else None
-    except:
+        r = requests.get(url, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            return data if isinstance(data, list) and len(data) > 0 else (data if isinstance(data, dict) else None)
+        return None
+    except Exception:
         return None
 
-# --- EXCEL LOGIC: 20-YEAR IV CALCULATOR ---
-def calculate_vmi_iv(fcf, debt, cash, shares, beta):
-    # Data from 'Discount Rate Data' and 'VMI IV Calculator (20 years)' sheets
-    rf = 0.03608  # Rf Average
-    mrp = 0.02728 # MRP Average
-    discount_rate = rf + (beta * mrp) # Discount Rate = Rf + Beta x MRP
+# --- VMI 20-YEAR IV CALCULATOR (Logic from Excel Template ) ---
+def calculate_vmi_iv(fcf, total_debt, cash_investments, shares, beta):
+    # Discount Rate Data [cite: 1, 4]
+    rf = 0.03608  # US Rf Average [cite: 4]
+    mrp = 0.02728 # US MRP Average [cite: 4]
+    discount_rate = rf + (beta * mrp) # Formula: $Rf + \beta \times MRP$ 
     
-    # Growth Stages
-    # Yr 1-5: 17.48% | Yr 6-10: 15% | Yr 11-20: 4%
-    g1, g2, g3 = 0.1748, 0.15, 0.04
+    # Free Cash Flow Growth Rates 
+    g1, g2, g3 = 0.1748, 0.15, 0.04 # Yr 1-5, Yr 6-10, Yr 11-20
     
     total_pv = 0
-    temp_fcf = fcf
+    projected_fcf = fcf
     for year in range(1, 21):
         if year <= 5: 
             growth = g1
@@ -55,30 +56,33 @@ def calculate_vmi_iv(fcf, debt, cash, shares, beta):
         else: 
             growth = g3
         
-        temp_fcf *= (1 + growth)
-        total_pv += temp_fcf / ((1 + discount_rate) ** year)
+        projected_fcf *= (1 + growth)
+        total_pv += projected_fcf / ((1 + discount_rate) ** year)
     
-    # Final IV Calculation per Excel logic
-    iv_before_adj = total_pv / (shares if shares > 0 else 1)
-    cash_per_share = cash / (shares if shares > 0 else 1)
-    debt_per_share = debt / (shares if shares > 0 else 1)
-    
-    iv = iv_before_adj + cash_per_share - debt_per_share
-    return round(iv, 2)
+    # Intrinsic Value Formula 
+    # $IV = \frac{PV\ of\ 20yr\ FCF - Total\ Debt + Cash}{Shares}$
+    if shares > 0:
+        iv = (total_pv - total_debt + cash_investments) / shares
+        return round(iv, 2)
+    return 0.0
 
 if run_btn:
     with st.spinner('Syncing VMI Algorithm...'):
+        # Step-by-step data acquisition to avoid blank pages
         p_data = fetch_oracle("profile")
         m_data = fetch_oracle("key-metrics-ttm")
         b_data = fetch_oracle("balance-sheet-statement", "&limit=1")
         h_data = fetch_oracle("historical-price-full", "&timeseries=250")
         
         if p_data:
-            p, m, b = p_data[0], (m_data[0] if m_data else {}), (b_data[0] if b_data else {})
+            p = p_data[0]
+            m = m_data[0] if m_data else {}
+            b = b_data[0] if b_data else {}
             
             tab_ov, tab_chart, tab_iv, tab_moat = st.tabs(["📊 Overview", "📈 Technical Chart", "🎯 20yr IV Model", "🛡️ AI Moat"])
 
             with tab_ov:
+                # Scorecard UI from StockOracle Screenshot
                 s1, s2, s3, s4, s5, s6 = st.columns(6)
                 with s1: st.markdown('<div class="score-card"><div class="score-label">Predictability</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
                 with s2: st.markdown('<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">9/10</div></div>', unsafe_allow_html=True)
@@ -88,14 +92,14 @@ if run_btn:
                 with s6: st.markdown('<div class="score-card"><div class="score-label">Valuation</div><div class="score-value">6/10</div></div>', unsafe_allow_html=True)
 
                 st.divider()
-                st.header(p.get('companyName'))
-                st.write(p.get('description', 'No summary available.')[:1000] + "...")
+                st.header(p.get('companyName', ticker))
+                st.write(p.get('description', 'Data overview currently unavailable.')[:1200] + "...")
                 
-                st.subheader("Current Trading Context")
+                # Populating Overview Metrics
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Market Cap", f"${round(p.get('mktCap', 0)/1e9, 2)}B")
-                c2.metric("P/E Ratio", round(p.get('price', 0)/p.get('eps', 1), 2) if p.get('eps') else "N/A")
-                c3.metric("52W Range", f"{p.get('range', 'N/A')}")
+                c2.metric("EPS (TTM)", f"${p.get('eps', 'N/A')}")
+                c3.metric("52W Range", p.get('range', 'N/A'))
 
             with tab_chart:
                 if h_data and 'historical' in h_data:
@@ -105,6 +109,66 @@ if run_btn:
                     df['SMA50'] = df['close'].rolling(50).mean()
                     df['SMA200'] = df['close'].rolling(200).mean()
                     
-                    fig = go.Figure(data=[go.Candlestick(x=df['date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name="Price")])
+                    fig = go.Figure(data=[go.Candlestick(
+                        x=df['date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name="Price"
+                    )])
                     fig.add_trace(go.Scatter(x=df['date'], y=df['SMA50'], line=dict(color='orange', width=1), name="SMA 50"))
-                    fig.add_trace(go.Scatter(x=df['
+                    fig.add_trace(go.Scatter(x=df['date'], y=df['SMA200'], line=dict(color='red', width=1.5), name="SMA 200"))
+                    
+                    # Support Line (VMI Manual Calc)
+                    vmi_support = df['low'].min()
+                    fig.add_hline(y=vmi_support, line_dash="dash", line_color="green", annotation_text="VMI Support")
+                    
+                    fig.update_layout(template="plotly_dark", height=600, margin=dict(l=10, r=10, t=10, b=10))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("🔄 Technical data is loading or restricted by API. Try refreshing in 60s.")
+
+            with tab_iv:
+                # Calculating using user-provided Excel parameters 
+                fcf = m.get('freeCashFlowTTM', 0)
+                debt = b.get('totalDebt', 0)
+                cash = b.get('cashAndShortTermInvestments', 0)
+                shares = m.get('numberOfShares', p.get('mktCap', 0) / p.get('price', 1) if p.get('price') else 1)
+                beta = p.get('beta', 1.1)
+                
+                vmi_iv = calculate_vmi_iv(fcf, debt, cash, shares, beta)
+                price = p.get('price', 0)
+                
+                iv_c1, iv_c2, iv_c3 = st.columns(3)
+                iv_c1.metric("Current Price", f"${price}")
+                iv_c2.metric("VMI 20yr Intrinsic Value", f"${vmi_iv}")
+                if price > 0:
+                    margin = round(((vmi_iv - price)/price)*100, 2)
+                    iv_c3.metric("Margin of Safety", f"{margin}%")
+                
+                if vmi_iv > price:
+                    st.success(f"🎯 VMI Signal: UNDERVALUED. Trading at a {margin}% discount to intrinsic value.")
+                else:
+                    st.warning(f"⚖️ VMI Signal: OVERVALUED / FAIR VALUE. Stock is {abs(margin)}% above intrinsic value.")
+
+            with tab_moat:
+                st.header(f"{p.get('companyName')} AI Moat Analysis")
+                st.markdown('<div class="moat-box"><h3>Wide Moat</h3><p>Overall score: 10 / 10</p></div>', unsafe_allow_html=True)
+                
+                col_m1, col_m2 = st.columns(2)
+                with col_m1:
+                    st.subheader("1. Brand Loyalty & Pricing Power")
+                    st.write("**Score: 10 / 10**")
+                    st.write("Commanding price premiums and sustained gross margins far exceeding industry averages.")
+                    
+                    st.subheader("2. High Barriers to Entry")
+                    st.write("**Score: 10 / 10**")
+                    st.write("Anchored in proprietary software platforms (like CUDA), extensive patent portfolios, and billions in annual R&D.")
+                
+                with col_m2:
+                    st.subheader("3. High Switching Costs")
+                    st.write("**Score: 10 / 10**")
+                    st.write("Deep integration into customer workflows makes migration irrationally expensive and operationally risky.")
+                    
+                    st.subheader("4. Network Effects")
+                    st.write("**Score: 10 / 10**")
+                    st.write("Developer ecosystems and software libraries create a self-reinforcing flywheel for platform growth.")
+
+        else:
+            st.error("❌ Data search failed. Please ensure the symbol is correct and wait 60s for the API rate limit to reset.")
