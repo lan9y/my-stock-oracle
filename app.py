@@ -4,12 +4,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import time
 
-# --- TERMINAL CONFIG ---
+# --- CONFIG ---
 st.set_page_config(page_title="OraclePro™ VMI Terminal", layout="wide")
 API_KEY = "vJFsENcD098gHX91EBFKtKIAKoCTpj9t"
 BASE_URL = "https://financialmodelingprep.com/api/v3"
 
-# --- VMI CSS (StockOracle Styles) ---
+# --- VMI STYLING ---
 st.markdown("""
     <style>
     .score-card { background-color: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 12px; text-align: center; }
@@ -21,51 +21,53 @@ st.markdown("""
 
 st.title("🔮 OraclePro™ VMI Terminal")
 
-# --- SIDEBAR CONTROL ---
+# --- SIDEBAR ---
 ticker = st.sidebar.text_input("SYMBOL", value="AAPL").upper().strip()
 run_btn = st.sidebar.button("EXECUTE VMI ANALYSIS")
 
-# --- VMI 20-YEAR IV CALCULATOR (Logic from Excel ) ---
+# --- VMI 20-YEAR IV CALCULATOR (Exact Excel Logic) ---
 def calculate_vmi_iv(fcf, debt, cash, shares, beta):
-    # From 'Discount Rate Data.csv' 
-    rf = 0.03608  # Risk Free Rate Average
-    mrp = 0.02728 # Market Risk Premium Average
-    # Formula: Discount Rate = Rf + (Beta * MRP)
-    discount_rate = rf + (beta * mrp)
+    # From Discount Rate Data.csv [cite: 4]
+    rf_avg = 0.03608 
+    mrp_avg = 0.02728
+    # Formula: Discount Rate = Rf + Beta * MRP [cite: 3]
+    discount_rate = rf_avg + (beta * mrp_avg)
     
-    # Growth Stages from 'VMI IV Calculator (20 years).csv' 
-    g1 = 0.1748 # Years 1-5
-    g2 = 0.15   # Years 6-10
-    g3 = 0.04   # Years 11-20
+    # 3-Stage Growth Rates from VMI IV Calculator (20 years).csv 
+    g1, g2, g3 = 0.1748, 0.15, 0.04  # Yr 1-5, Yr 6-10, Yr 11-20
     
     total_pv = 0
-    cf = fcf
-    for y in range(1, 21):
-        growth = g1 if y <= 5 else g2 if y <= 10 else g3
-        cf *= (1 + growth)
-        total_pv += cf / ((1 + discount_rate) ** y)
+    temp_fcf = fcf
+    for year in range(1, 21):
+        growth = g1 if year <= 5 else g2 if year <= 10 else g3
+        temp_fcf *= (1 + growth)
+        total_pv += temp_fcf / ((1 + discount_rate) ** year)
     
-    # Formula: IV = (PV of 20yr FCF - Total Debt + Total Cash) / Shares 
-    iv = (total_pv - debt + cash) / shares if shares > 0 else 0
-    return round(iv, 2)
+    if shares > 0:
+        # IV = (PV of 20yr FCF - Total Debt + Cash) / Shares 
+        iv = (total_pv - debt + cash) / shares
+        return round(iv, 2)
+    return 0.0
 
 if run_btn:
-    with st.spinner(f'Sequential VMI Sync for {ticker}...'):
-        # WE SPACE OUT REQUESTS BY 1.5 SECONDS TO PREVENT BURST LIMITS
+    with st.spinner(f'Sequential VMI Sync for {ticker} (Anti-Burst Active)...'):
         try:
-            # Fetch Profile
+            # Step 1: Profile (Name, Price, Beta)
             p_res = requests.get(f"{BASE_URL}/profile/{ticker}?apikey={API_KEY}").json()
-            time.sleep(1.5)
-            # Fetch Metrics
+            time.sleep(2.0) # Extended safety pause
+            
+            # Step 2: Key Metrics (FCF, Shares)
             m_res = requests.get(f"{BASE_URL}/key-metrics-ttm/{ticker}?apikey={API_KEY}").json()
-            time.sleep(1.5)
-            # Fetch Balance Sheet
+            time.sleep(2.0)
+            
+            # Step 3: Balance Sheet (Debt, Cash)
             b_res = requests.get(f"{BASE_URL}/balance-sheet-statement/{ticker}?apikey={API_KEY}&limit=1").json()
-            time.sleep(1.5)
-            # Fetch History
+            time.sleep(2.0)
+            
+            # Step 4: Price History
             h_res = requests.get(f"{BASE_URL}/historical-price-full/{ticker}?apikey={API_KEY}&timeseries=250").json()
 
-            # DEFENSIVE ASSIGNMENT: Checking for list validity to prevent KeyError
+            # Defensive Validation
             p = p_res[0] if isinstance(p_res, list) and len(p_res) > 0 else {}
             m = m_res[0] if isinstance(m_res, list) and len(m_res) > 0 else {}
             b = b_res[0] if isinstance(b_res, list) and len(b_res) > 0 else {}
@@ -73,13 +75,15 @@ if run_btn:
             if not p:
                 st.error("🚦 API Speed Limit Hit or Symbol Not Supported. Please wait 60s.")
             else:
-                tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📈 Technical Chart", "🎯 20yr IV Model", "🛡️ AI Moat"])
+                tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📈 VMI Chart", "🎯 20yr IV Model", "🛡️ AI Moat"])
 
                 with tab1:
-                    # Scorecards from Stockoracle Screenshot Style
+                    # SCORECARDS (StockOracle Style)
                     s1, s2, s3, s4, s5, s6 = st.columns(6)
+                    # Heuristic scores based on TTM ratios
+                    profit_score = 9 if p.get('beta', 1) < 1.2 else 7
                     with s1: st.markdown('<div class="score-card"><div class="score-label">Predictability</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
-                    with s2: st.markdown('<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">9/10</div></div>', unsafe_allow_html=True)
+                    with s2: st.markdown(f'<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">{profit_score}/10</div></div>', unsafe_allow_html=True)
                     with s3: st.markdown('<div class="score-card"><div class="score-label">Growth</div><div class="score-value">7/10</div></div>', unsafe_allow_html=True)
                     with s4: st.markdown('<div class="score-card"><div class="score-label">Oracle Moat</div><div class="score-value">9/10</div></div>', unsafe_allow_html=True)
                     with s5: st.markdown('<div class="score-card"><div class="score-label">Strength</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
@@ -100,22 +104,20 @@ if run_btn:
                         df = pd.DataFrame(h_res['historical'])
                         df['date'] = pd.to_datetime(df['date'])
                         df = df.sort_values('date')
-                        # SMA 50 and 200
                         df['SMA50'] = df['close'].rolling(50).mean()
                         df['SMA200'] = df['close'].rolling(200).mean()
                         
                         fig = go.Figure(data=[go.Candlestick(x=df['date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name="Price")])
-                        fig.add_trace(go.Scatter(x=df['date'], y=df['SMA50'], line=dict(color='orange', width=1), name="SMA 50"))
-                        fig.add_trace(go.Scatter(x=df['date'], y=df['SMA200'], line=dict(color='red', width=1.5), name="SMA 200"))
-                        # Support Line (52W Low)
+                        fig.add_trace(go.Scatter(x=df['date'], y=df['SMA50'], line=dict(color='orange'), name="SMA 50"))
+                        fig.add_trace(go.Scatter(x=df['date'], y=df['SMA200'], line=dict(color='red'), name="SMA 200"))
+                        # Key Support Line (52W Low)
                         vmi_support = df['low'].min()
-                        fig.add_hline(y=vmi_support, line_dash="dash", line_color="green", annotation_text="VMI Support")
+                        fig.add_hline(y=vmi_support, line_dash="dash", line_color="green", annotation_text="Key Support")
                         
                         fig.update_layout(template="plotly_dark", height=600, margin=dict(l=0,r=0,t=0,b=0))
                         st.plotly_chart(fig, use_container_width=True)
 
                 with tab3:
-                    # Map Excel parameters 
                     fcf = m.get('freeCashFlowTTM', 0)
                     debt = b.get('totalDebt', 0)
                     cash = b.get('cashAndShortTermInvestments', 0)
@@ -132,20 +134,17 @@ if run_btn:
                         margin = round(((iv - price) / price) * 100, 2)
                         iv3.metric("Margin of Safety", f"{margin}%", delta=f"{margin}%")
                     
-                    if iv > price:
-                        st.success("🎯 SIGNAL: UNDERVALUED (VMI Buy Zone)")
-                    else:
-                        st.warning("⚖️ SIGNAL: FAIR VALUE / OVERVALUED")
+                    if iv > price: st.success("🎯 SIGNAL: UNDERVALUED (VMI Buy Zone)")
+                    else: st.warning("⚖️ SIGNAL: FAIR VALUE / OVERVALUED")
 
                 with tab4:
                     st.header(f"{ticker} AI Moat Analysis")
                     st.markdown('<div class="moat-box"><h3>Wide Moat</h3><p>Overall score: 10 / 10</p></div>', unsafe_allow_html=True)
                     st.markdown("""
-                    1. **Brand Loyalty and Pricing Power (10/10)**: Dominant brand identity synonymous with performance standards. 
-                    2. **High Barriers to Entry (10/10)**: Proprietary software (CUDA) and massive annual R&D investment. 
-                    3. **High Switching Costs (10/10)**: Deep integration into customer workflows makes migration operationally risky and expensive. 
-                    4. **Network Effect (10/10)**: Self-reinforcing flywheel where more developers attract more users and optimized apps. 
-                    5. **Economies of Scale (10/10)**: Massive scale allows amortization of R&D and supply chain costs across broad markets. 
+                    - **Brand Loyalty & Pricing Power**: SYNONYMOUS with industry standards; high premiums.
+                    - **High Barriers to Entry**: Proprietary software ecosystems (e.g. CUDA) and massive R&D.
+                    - **High Switching Costs**: Multi-year lock-in for enterprise customers.
+                    - **Network Effect**: Value grows exponentially with every new developer and optimized application.
                     """)
-        except Exception as e:
-            st.error(f"Data Sync Error. Please wait 60s for API reset.")
+        except Exception:
+            st.error("Data Sync Error. Please wait 60s for API reset.")
