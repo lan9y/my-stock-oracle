@@ -17,18 +17,14 @@ st.markdown("""
     .score-value { color: #4CAF50; font-size: 22px; font-weight: 800; }
     .etf-card { background-color: #1c2128; border: 1px solid #30363d; padding: 12px; border-radius: 8px; margin-bottom: 12px; }
     .etf-ticker { font-weight: 800; color: #ffffff; font-size: 14px; }
-    .etf-price { font-size: 18px; font-weight: 700; color: #4CAF50; }
     .moat-badge { padding: 4px 12px; border-radius: 15px; font-weight: 800; font-size: 12px; margin-left: 10px; border: 1px solid; }
     .wide-moat { background-color: #1b4d3e; color: #4CAF50; border-color: #4CAF50; }
-    .narrow-moat { background-color: #4d401b; color: #ff9800; border-color: #ff9800; }
-    .no-moat { background-color: #4d1b1b; color: #ff5252; border-color: #ff5252; }
-    .metric-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #30363d; }
     .valuation-box { background: #1c2128; border-left: 5px solid #4CAF50; padding: 15px; border-radius: 4px; margin-bottom: 15px; }
     .thesis-box { background: #161b22; border: 1px solid #30363d; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- HELPER: ROBUST MARKET PULSE ---
+# --- ANALYTICS HELPERS ---
 def get_market_pulse():
     indices = ["SPY", "QQQ", "DIA"]
     pulse = []
@@ -39,18 +35,17 @@ def get_market_pulse():
             prev = data[ticker].iloc[-2]
             chg = ((px - prev) / prev) * 100
             pulse.append({"ticker": ticker, "price": px, "change": chg})
-    except: pulse = [{"ticker": "ERROR", "price": 0, "change": 0}]
+    except: pulse = [{"ticker": "ERR", "price": 0, "change": 0}]
     return pulse
 
-# --- HELPER: RSI CALC ---
 def calculate_rsi(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
+    rs = gain / (loss + 1e-9)
     return 100 - (100 / (1 + rs))
 
-# --- VALUATION ENGINES (EXCEL SYNC) ---
+# --- VMI EXCEL LOGIC SYNC ---
 def vmi_20yr_dcf(fcf, debt, cash, shares, beta):
     rf, mrp = 0.03608, 0.02728 
     dr = rf + (beta * mrp)
@@ -78,24 +73,14 @@ if run_btn:
         col_main, col_pulse = st.columns([3, 1])
 
         with col_main:
-            # 1. LIVE HEADER & MOAT
+            # 1. HEADER
             roa = info.get('returnOnAssets', 0)
             moat_label, moat_css = ("WIDE MOAT", "wide-moat") if roa > 0.10 else ("NARROW MOAT", "narrow-moat")
             curr_p = info.get('currentPrice', 0)
             p_chg = info.get('regularMarketChangePercent', 0)
-            
-            st.markdown(f"""
-                <div style="margin-bottom:20px;">
-                    <span style="color:#8b949e; font-weight:700;">{info.get('longName')} ({ticker_sym})</span>
-                    <span class="moat-badge {moat_css}">{moat_label}</span>
-                    <div style="font-size:42px; font-weight:800; color:#ffffff;">${curr_p:,.2f}</div>
-                    <span style="color:{'#4CAF50' if p_chg >= 0 else '#FF5252'}; font-weight:700; font-size:18px;">
-                        {"▲" if p_chg >= 0 else "▼"} {abs(p_chg):.2f}%
-                    </span>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<span style="color:#8b949e; font-weight:700;">{info.get("longName")} ({ticker_sym})</span> <span class="moat-badge {moat_css}">{moat_label}</span><div style="font-size:42px; font-weight:800; color:#ffffff;">${curr_p:,.2f}</div><span style="color:{"#4CAF50" if p_chg >= 0 else "#FF5252"}; font-weight:700;">{"▲" if p_chg >= 0 else "▼"} {abs(p_chg):.2f}%</span>', unsafe_allow_html=True)
 
-            tabs = st.tabs(["📊 Overview", "📑 Financials", "📈 Chart", "🎯 Valuation", "🤖 AI Thesis"])
+            tabs = st.tabs(["📊 Overview", "📑 Financials", "📈 Advanced Chart", "🎯 Valuation", "🤖 AI Thesis"])
 
             with tabs[0]:
                 s1, s2, s3, s4, s5, s6 = st.columns(6)
@@ -117,32 +102,47 @@ if run_btn:
                     for k,v in m_r.items(): st.markdown(f'<div class="metric-row"><span class="metric-name">{k}</span><span class="metric-val">{v}</span></div>', unsafe_allow_html=True)
 
             with tabs[2]:
+                # --- CHARTING ENGINE ---
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
                 fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'], name="Price"), row=1, col=1)
+                
+                # Moving Averages
                 for sma in sma_toggle:
                     p = int(sma.split(" ")[1]); hist[sma] = hist['Close'].rolling(window=p).mean()
-                    fig.add_trace(go.Scatter(x=hist.index, y=hist[sma], name=sma), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist[sma], name=sma, line=dict(width=1.2)), row=1, col=1)
+                
+                # KEY EVENTS: Dividends & Earnings
+                divs = stock.dividends[stock.dividends.index >= hist.index[0]]
+                for date, val in divs.items():
+                    fig.add_annotation(x=date, y=0, yref="paper", text="D", showarrow=False, font=dict(color="gold", size=10), bgcolor="#1c2128", bordercolor="gold")
+                
+                earnings = stock.calendar
+                if earnings is not None and 'Earnings Date' in earnings:
+                    for edate in earnings['Earnings Date']:
+                        if hist.index[0] <= edate <= hist.index[-1]:
+                            fig.add_annotation(x=edate, y=0, yref="paper", text="E", showarrow=False, font=dict(color="#4CAF50", size=10), bgcolor="#1c2128", bordercolor="#4CAF50")
+
+                # RSI (Oversold/Overbought)
                 hist['RSI'] = calculate_rsi(hist['Close'])
                 fig.add_trace(go.Scatter(x=hist.index, y=hist['RSI'], name="RSI", line=dict(color='plum')), row=2, col=1)
                 fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
                 fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-                fig.update_layout(template="plotly_dark", height=700, xaxis_rangeslider_visible=False)
+                
+                fig.update_layout(template="plotly_dark", height=700, xaxis_rangeslider_visible=False, margin=dict(l=0,r=0,t=0,b=0))
                 st.plotly_chart(fig, use_container_width=True)
 
             with tabs[3]:
-                st.subheader("Fair Value Models")
                 iv_20 = vmi_20yr_dcf(info.get('freeCashflow', 0), info.get('totalDebt', 0), info.get('totalCash', 0), info.get('sharesOutstanding', 1), info.get('beta', 1.1))
                 v1, v2, v3 = st.columns(3)
                 v1.markdown(f'<div class="valuation-box"><b>VMI 20yr DCF</b><br><span style="font-size:24px;">${iv_20}</span></div>', unsafe_allow_html=True)
                 v2.markdown(f'<div class="valuation-box"><b>Mean P/B</b><br><span style="font-size:24px;">${round(info.get("bookValue",0)*1.75, 2)}</span></div>', unsafe_allow_html=True)
                 v3.markdown(f'<div class="valuation-box"><b>PSG Model</b><br><span style="font-size:24px;">${round((info.get("totalRevenue",0)/info.get("sharesOutstanding",1))*2.5, 2)}</span></div>', unsafe_allow_html=True)
-                st.divider(); st.metric("Mean Analyst Target", f"${info.get('targetMeanPrice', 'N/A')}")
+                st.divider(); st.metric("Analyst Target", f"${info.get('targetMeanPrice', 'N/A')}")
 
             with tabs[4]:
-                st.subheader("🤖 AI Investment Research")
                 c_bull, c_bear = st.columns(2)
-                with c_bull: st.markdown('<div class="thesis-box"><h4 style="color:#4CAF50;">🟢 Bull Thesis</h4>2026 AI expansion and recurring service revenue outperformance. Target: $280+</div>', unsafe_allow_html=True)
-                with c_bear: st.markdown('<div class="thesis-box"><h4 style="color:#FF5252;">🔴 Bear Thesis</h4>Geopolitical risk in China and regulatory antitrust headwinds. Target: $185-</div>', unsafe_allow_html=True)
+                with c_bull: st.markdown('<div class="thesis-box"><h4 style="color:#4CAF50;">🟢 Bull Thesis</h4>2026 AI expansion and recurring service revenue outperformance.</div>', unsafe_allow_html=True)
+                with c_bear: st.markdown('<div class="thesis-box"><h4 style="color:#FF5252;">🔴 Bear Thesis</h4>Geopolitical risk in China and regulatory antitrust headwinds.</div>', unsafe_allow_html=True)
 
         with col_pulse:
             st.markdown('<div style="text-align:center; color:#8b949e; font-weight:800; font-size:12px; margin-bottom:15px;">MARKET PULSE</div>', unsafe_allow_html=True)
