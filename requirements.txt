@@ -1,5 +1,6 @@
 streamlit
 pandas
 plotly
-yfinance>=1.2.2
+yfinance
 requests
+curl_cffi
