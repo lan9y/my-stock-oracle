@@ -30,16 +30,20 @@ st.markdown("""
 def get_market_pulse():
     indices = ["SPY", "QQQ", "DIA"]
     pulse = []
-    try:
-        # Fetching specific columns to avoid multi-index errors
-        data = yf.download(indices, period="5d", interval="1d", progress=False)['Close']
-        for ticker in indices:
-            px = data[ticker].dropna().iloc[-1]
-            prev = data[ticker].dropna().iloc[-2]
-            chg = ((px - prev) / prev) * 100
-            pulse.append({"ticker": ticker, "price": px, "change": chg})
-    except Exception:
-        pulse = [{"ticker": "SPY", "price": 0, "change": 0}, {"ticker": "QQQ", "price": 0, "change": 0}]
+    for ticker in indices:
+        try:
+            t = yf.Ticker(ticker)
+            # Use history for reliability over download
+            h = t.history(period="5d")
+            if not h.empty:
+                px = h['Close'].iloc[-1]
+                prev = h['Close'].iloc[-2]
+                chg = ((px - prev) / prev) * 100
+                pulse.append({"ticker": ticker, "price": px, "change": chg})
+            else:
+                pulse.append({"ticker": ticker, "price": 0, "change": 0})
+        except:
+            pulse.append({"ticker": ticker, "price": 0, "change": 0})
     return pulse
 
 def calculate_rsi(series, period=14):
@@ -86,7 +90,7 @@ if run_btn:
 
             st.markdown(f"""
                 <div style="margin-bottom:20px;">
-                    <span style="color:#8b949e; font-weight:700;">{info.get('longName')} ({ticker_sym})</span>
+                    <span style="color:#8b949e; font-weight:700;">{info.get('longName', ticker_sym)}</span>
                     <span class="moat-badge {moat_css}">{moat_label}</span>
                     <div class="live-price-header">${curr_p:,.2f}</div>
                     <span style="color:{'#4CAF50' if p_chg >= 0 else '#FF5252'}; font-weight:700; font-size:18px;">
@@ -100,14 +104,15 @@ if run_btn:
             with tabs[0]:
                 s1, s2, s3, s4, s5, s6 = st.columns(6)
                 with s1: st.markdown(f'<div class="score-card"><div class="score-label">Predictability</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
-                with s2: st.markdown(f'<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">{int(min(roa*100/1.5, 10))}/10</div></div>', unsafe_allow_html=True)
+                with s2: st.markdown(f'<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">{int(min(roa*100/1.5, 10)) if roa else 5}/10</div></div>', unsafe_allow_html=True)
                 with s3: st.markdown(f'<div class="score-card"><div class="score-label">Growth</div><div class="score-value">7/10</div></div>', unsafe_allow_html=True)
                 with s4: st.markdown(f'<div class="score-card"><div class="score-label">Oracle Moat</div><div class="score-value">9/10</div></div>', unsafe_allow_html=True)
                 with s5: st.markdown(f'<div class="score-card"><div class="score-label">Strength</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
                 with s6: st.markdown(f'<div class="score-card"><div class="score-label">Valuation</div><div class="score-value">6/10</div></div>', unsafe_allow_html=True)
-                st.divider(); st.write(info.get('longBusinessSummary'))
+                st.divider(); st.write(info.get('longBusinessSummary', "No summary available."))
 
             with tabs[1]:
+                st.subheader("Deep-Dive Financial Indicators")
                 col_l, col_r = st.columns(2)
                 with col_l:
                     m_l = {"P/E Ratio (TTM)": f"{info.get('trailingPE', 0):.2f}", "Forward P/E": f"{info.get('forwardPE', 0):.2f}", "Projected 3-5Y Growth": f"{info.get('earningsGrowth', 0)*100:.2f}%", "Dividend Yield": f"{info.get('dividendYield', 0)*100:.2f}%", "PEG Ratio": f"{info.get('pegRatio', 'N/A')}"}
@@ -117,16 +122,15 @@ if run_btn:
                     for k,v in m_r.items(): st.markdown(f'<div class="metric-row"><span class="metric-name">{k}</span><span class="metric-val">{v}</span></div>', unsafe_allow_html=True)
 
             with tabs[2]:
-                # FIX: Explicitly handle Timestamp comparisons
+                # CHARTING WITH ROBUST DATE HANDLING
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
                 fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'], name="Price"), row=1, col=1)
                 
-                # Overlays
                 for sma in sma_toggle:
                     p = int(sma.split(" ")[1]); hist[sma] = hist['Close'].rolling(window=p).mean()
                     fig.add_trace(go.Scatter(x=hist.index, y=hist[sma], name=sma, line=dict(width=1.2)), row=1, col=1)
                 
-                # EVENTS: Compare date to date
+                # Robust Events Logic
                 divs = stock.dividends[stock.dividends.index >= hist.index[0]]
                 for date, val in divs.items():
                     fig.add_annotation(x=date, y=0, yref="paper", text="D", font=dict(color="gold"), showarrow=False, bgcolor="#1c2128")
@@ -134,11 +138,11 @@ if run_btn:
                 cal = stock.calendar
                 if cal is not None and 'Earnings Date' in cal:
                     for edate in cal['Earnings Date']:
-                        # Ensure comparison happens between the same types
-                        if hist.index[0].date() <= edate.date() <= hist.index[-1].date():
-                            fig.add_annotation(x=edate, y=0, yref="paper", text="E", font=dict(color="#4CAF50"), showarrow=False, bgcolor="#1c2128")
+                        # Use pd.to_datetime to ensure comparison compatibility
+                        clean_edate = pd.to_datetime(edate).date()
+                        if hist.index[0].date() <= clean_edate <= hist.index[-1].date():
+                            fig.add_annotation(x=clean_edate, y=0, yref="paper", text="E", font=dict(color="#4CAF50"), showarrow=False, bgcolor="#1c2128")
 
-                # RSI
                 hist['RSI'] = calculate_rsi(hist['Close'])
                 fig.add_trace(go.Scatter(x=hist.index, y=hist['RSI'], name="RSI", line=dict(color='plum')), row=2, col=1)
                 fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
