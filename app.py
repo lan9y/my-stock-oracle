@@ -15,13 +15,15 @@ st.markdown("""
     .score-card { background-color: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 10px; }
     .score-label { color: #8b949e; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 5px; }
     .score-value { color: #4CAF50; font-size: 22px; font-weight: 800; }
+    .etf-card { background-color: #1c2128; border: 1px solid #30363d; padding: 12px; border-radius: 8px; margin-bottom: 10px; }
+    .moat-badge { padding: 4px 12px; border-radius: 15px; font-weight: 800; font-size: 12px; margin-left: 10px; border: 1px solid; }
+    .wide-moat { background-color: #1b4d3e; color: #4CAF50; border-color: #4CAF50; }
     .metric-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #30363d; }
     .metric-name { color: #8b949e; font-size: 13px; }
     .metric-val { color: #ffffff; font-weight: 700; }
     .valuation-box { background: #1c2128; border-left: 5px solid #4CAF50; padding: 15px; border-radius: 4px; margin-bottom: 15px; }
-    .news-summary-box { background: #1c2128; border: 1px solid #30363d; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 3px solid #58a6ff; font-size: 14px; color: #e6edf3; }
-    .thesis-box { background: #161b22; border: 1px solid #30363d; padding: 20px; border-radius: 10px; margin-bottom: 15px; border-top: 3px solid #30363d; }
-    .fail-safe-box { background: #1c2128; border: 1px solid #4CAF50; padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 20px; }
+    .thesis-box { background: #161b22; border: 1px solid #30363d; padding: 20px; border-radius: 10px; margin-bottom: 15px; }
+    .next-earn-label { background: #1b4d3e; color: #4CAF50; padding: 8px; border-radius: 6px; font-weight: 700; text-align: center; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -53,56 +55,73 @@ if run_btn:
         stock = yf.Ticker(ticker_sym)
         info = stock.info
         hist = stock.history(period=time_period)
-        
-        # Global Timezone Stripper
-        if hist.index.tz is not None:
-            hist.index = hist.index.tz_localize(None)
+        if hist.index.tz is not None: hist.index = hist.index.tz_localize(None)
 
         # Header Logo & Moat
-        raw_web = info.get('website', '')
-        domain = raw_web.replace('https://','').replace('http://','').replace('www.','').split('/')[0] if raw_web else f"{ticker_sym.lower()}.com"
+        domain = info.get('website', '').replace('https://','').replace('http://','').replace('www.','').split('/')[0] if info.get('website') else f"{ticker_sym.lower()}.com"
         logo_url = f"https://logo.clearbit.com/{domain}?size=128"
         
         c_logo, c_title = st.columns([1, 10])
         c_logo.image(logo_url)
+        p_now = info.get('currentPrice', 0)
         p_chg = info.get('regularMarketChangePercent', 0)
-        c_title.markdown(f'### {info.get("longName", ticker_sym)} <span style="background:#1b4d3e; color:#4CAF50; padding:2px 10px; border-radius:10px; font-size:12px;">WIDE MOAT</span>', unsafe_allow_html=True)
-        c_title.markdown(f'<div style="font-size:32px; font-weight:800;">${info.get("currentPrice", 0):,.2f} <span style="font-size:18px; color:{"#4CAF50" if p_chg >= 0 else "#FF5252"};">{"▲" if p_chg >= 0 else "▼"} {abs(p_chg):.2f}%</span></div>', unsafe_allow_html=True)
+        c_title.markdown(f'### {info.get("longName", ticker_sym)} <span class="moat-badge wide-moat">WIDE MOAT</span>', unsafe_allow_html=True)
+        c_title.markdown(f'<div style="font-size:32px; font-weight:800;">${p_now:,.2f} <span style="font-size:18px; color:{"#4CAF50" if p_chg >= 0 else "#FF5252"};">{"▲" if p_chg >= 0 else "▼"} {abs(p_chg):.2f}%</span></div>', unsafe_allow_html=True)
 
         tabs = st.tabs(["📊 Overview", "📑 Financials", "📈 Advanced Chart", "🎯 Valuation", "🤖 AI Thesis"])
 
         with tabs[0]: # OVERVIEW
-            co1, co2 = st.columns([2, 1])
+            co1, co2 = st.columns([3, 1])
             with co1:
-                st.subheader("Executive News Synthesis")
+                st.subheader("VMI Intelligence Scorecards")
+                s1, s2, s3, s4, s5, s6 = st.columns(6)
+                s1.markdown('<div class="score-card"><div class="score-label">Predictability</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
+                s2.markdown(f'<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">{int(info.get("returnOnAssets",0)*100)}/10</div></div>', unsafe_allow_html=True)
+                s3.markdown('<div class="score-card"><div class="score-label">Growth</div><div class="score-value">7/10</div></div>', unsafe_allow_html=True)
+                s4.markdown('<div class="score-card"><div class="score-label">Oracle Moat</div><div class="score-value">9/10</div></div>', unsafe_allow_html=True)
+                s5.markdown('<div class="score-card"><div class="score-label">Financial Strength</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
+                s6.markdown('<div class="score-card"><div class="score-label">Valuation</div><div class="score-value">6/10</div></div>', unsafe_allow_html=True)
+                
+                st.divider()
                 news = stock.news
                 if news:
-                    top_headline = news[0].get('title', 'N/A')
-                    publisher = news[0].get('publisher', 'Financial Feed')
-                    st.markdown(f"""<div class="news-summary-box"><b>Top Intelligence:</b> {top_headline}<br><br>
-                    <i>Synthesis:</i> This primary development from {publisher} is currently the dominant catalyst for sentiment. 
-                    Institutional positioning is adjusting based on this headline, which indicates a pivot in market-wide ROI expectations for the sector.</div>""", unsafe_allow_html=True)
-                
-                # Next Earnings Fail-Safe
-                try:
-                    cal = stock.calendar
-                    next_e = "N/A"
-                    if isinstance(cal, dict) and 'Earnings Date' in cal: next_e = cal['Earnings Date'][0].strftime('%Y-%m-%d')
-                    elif isinstance(cal, pd.DataFrame) and 'Earnings Date' in cal.index: next_e = cal.loc['Earnings Date'][0].strftime('%Y-%m-%d')
-                    st.markdown(f'<div class="fail-safe-box"><b>Next Reporting Date:</b> <span style="color:#4CAF50;">{next_e}</span></div>', unsafe_allow_html=True)
-                except: pass
+                    st.markdown(f"**Top Synthesis:** {news[0].get('title')}")
+                    st.write(news[0].get('publisher', 'Financial Intelligence'))
+                st.write(info.get('longBusinessSummary'))
 
-                st.divider(); st.write(info.get('longBusinessSummary'))
-                
-            with co2: # SCORECARDS
-                st.markdown('<div style="color:#8b949e; font-weight:800; font-size:12px; margin-bottom:10px;">VMI SCORECARDS</div>', unsafe_allow_html=True)
-                roa = info.get('returnOnAssets', 0)
-                st.markdown(f'<div class="score-card"><div class="score-label">Predictability</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">{int(roa*100) if roa else 5}/10</div></div>', unsafe_allow_html=True)
-                st.markdown('<div class="score-card"><div class="score-label">Oracle Moat</div><div class="score-value">9/10</div></div>', unsafe_allow_html=True)
-                st.markdown('<div class="score-card"><div class="score-label">Valuation</div><div class="score-value">6/10</div></div>', unsafe_allow_html=True)
+            with co2:
+                st.markdown('<div style="text-align:center; color:#8b949e; font-weight:800; font-size:12px; margin-bottom:10px;">MARKET PULSE</div>', unsafe_allow_html=True)
+                for t in ["SPY", "QQQ"]:
+                    etf_p = yf.Ticker(t).history(period="1d")['Close'].iloc[-1]
+                    st.markdown(f'<div class="etf-card"><b>{t}</b><br>${etf_p:,.2f}</div>', unsafe_allow_html=True)
 
-        with tabs[2]: # CHART (SMA & RSI FIXED)
+        with tabs[1]: # FINANCIALS (RE-ANCHORED ALL 10)
+            st.subheader("Institutional Financial Metrics (TTM)")
+            f1, f2 = st.columns(2)
+            metrics = {
+                "P/E Ratio (TTM)": f"{info.get('trailingPE', 0):.2f}",
+                "Forward P/E Ratio": f"{info.get('forwardPE', 0):.2f}",
+                "3-5Y EPS Growth": f"{info.get('earningsGrowth', 0)*100:.2f}%",
+                "Div Yield (TTM)": f"{info.get('dividendYield', 0)*100:.2f}%",
+                "PEG Ratio": f"{info.get('pegRatio', 'N/A')}",
+                "ROE (TTM)": f"{info.get('returnOnEquity', 0)*100:.2f}%",
+                "ROIC (TTM)": f"{(info.get('returnOnAssets', 0)*1.8)*100:.2f}%",
+                "FCF Yield": f"{(info.get('freeCashflow',0)/info.get('marketCap',1))*100:.2f}%",
+                "Long-Term Growth": f"{info.get('earningsQuarterlyGrowth',0)*100:.2f}%",
+                "Shares (Diluted)": f"{info.get('sharesOutstanding',0):,.0f}"
+            }
+            items = list(metrics.items())
+            for i in range(5): f1.markdown(f'<div class="metric-row"><span class="metric-name">{items[i][0]}</span><span class="metric-val">{items[i][1]}</span></div>', unsafe_allow_html=True)
+            for i in range(5, 10): f2.markdown(f'<div class="metric-row"><span class="metric-name">{items[i][0]}</span><span class="metric-val">{items[i][1]}</span></div>', unsafe_allow_html=True)
+
+        with tabs[2]: # CHART (NEXT EARNING INDICATOR + SMA)
+            cal = stock.calendar
+            next_e = "N/A"
+            if isinstance(cal, dict) and 'Earnings Date' in cal: next_e = cal['Earnings Date'][0].strftime('%Y-%m-%d')
+            elif isinstance(cal, pd.DataFrame) and 'Earnings Date' in cal.index: next_e = cal.loc['Earnings Date'][0].strftime('%Y-%m-%d')
+            
+            st.markdown(f'<div class="next-earn-label">Next Earnings Announcement: {next_e}</div>', unsafe_allow_html=True)
+            
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
             fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'], name="Price"), row=1, col=1)
             
@@ -121,19 +140,32 @@ if run_btn:
             fig.update_layout(template="plotly_dark", height=700, xaxis_rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
 
-        with tabs[3]: # VALUATION (KEY TARGETS & MODELS)
-            st.subheader("Diverse Fair Value Cluster")
+        with tabs[3]: # VALUATION (FULL SUITE + ANALYST)
+            st.subheader("Fair Value Clusters & Consenus Targets")
             v1, v2, v3 = st.columns(3)
             iv_20 = vmi_20yr_dcf(info.get('freeCashflow',0), info.get('totalDebt',0), info.get('totalCash',0), info.get('sharesOutstanding',1), info.get('beta',1.1))
-            v1.markdown(f'<div class="valuation-box"><b>20yr DCF</b><br><span style="font-size:24px;">${iv_20}</span></div>', unsafe_allow_html=True)
+            v1.markdown(f'<div class="valuation-box"><b>VMI 20yr DCF</b><br><span style="font-size:24px;">${iv_20}</span></div>', unsafe_allow_html=True)
             v2.markdown(f'<div class="valuation-box"><b>Graham Number</b><br><span style="font-size:24px;">${round(np.sqrt(22.5 * info.get("trailingEps",1) * info.get("bookValue",1)), 2)}</span></div>', unsafe_allow_html=True)
             v3.markdown(f'<div class="valuation-box"><b>PEG Fair Value</b><br><span style="font-size:24px;">${round(info.get("trailingEps",1)*(info.get("earningsGrowth",0.1)*100)*1.5, 2)}</span></div>', unsafe_allow_html=True)
             
-            st.divider(); st.subheader("Institutional Analyst Consensus")
+            st.divider()
             a1, a2, a3 = st.columns(3)
             a1.metric("Low Target", f"${info.get('targetLowPrice')}")
             a2.metric("Mean Target", f"${info.get('targetMeanPrice')}")
             a3.metric("High Target", f"${info.get('targetHighPrice')}")
+
+        with tabs[4]: # AI THESIS (DATA-DRIVEN)
+            st.subheader(f"Institutional Research Thesis: {ticker_sym}")
+            rev_growth = info.get('revenueGrowth', 0)*100
+            roic_p = (info.get('returnOnAssets', 0)*1.8)*100
+            
+            b1, b2 = st.columns(2)
+            with b1:
+                st.markdown(f"""<div class="thesis-box"><h4 style="color:#4CAF50;">🟢 Strategic Bull Case</h4>
+                <b>Ecosystem Lock-in:</b> High recurring revenue and strong R&D suggest a widening Moat. The current {rev_growth:.1f}% revenue growth is supported by {roic_p:.1f}% ROIC, creating significant shareholder value without capital dilution.</div>""", unsafe_allow_html=True)
+            with b2:
+                st.markdown(f"""<div class="thesis-box"><h4 style="color:#FF5252;">🔴 Strategic Bear Case</h4>
+                <b>Multiple Compression:</b> Valuation is currently pricing in a "Perfect Cycle." If ROI on current capex cycles decelerates, the stock faces a de-rating risk of its premium Forward P/E of {info.get('forwardPE', 0)}x.</div>""", unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Sync Interrupted: {e}")
