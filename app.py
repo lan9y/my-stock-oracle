@@ -15,15 +15,17 @@ st.markdown("""
     .score-card { background-color: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 10px; }
     .score-label { color: #8b949e; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 5px; }
     .score-value { color: #4CAF50; font-size: 22px; font-weight: 800; }
-    .etf-card { background-color: #1c2128; border: 1px solid #30363d; padding: 12px; border-radius: 8px; margin-bottom: 5px; }
+    .etf-card { background-color: #1c2128; border: 1px solid #30363d; padding: 12px; border-radius: 8px; margin-bottom: 15px; }
     .moat-badge { padding: 4px 12px; border-radius: 15px; font-weight: 800; font-size: 12px; margin-left: 10px; border: 1px solid; }
     .wide-moat { background-color: #1b4d3e; color: #4CAF50; border-color: #4CAF50; }
     .metric-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #30363d; }
-    .metric-name { color: #8b949e; font-size: 14px; font-weight: 500; }
+    .metric-name { color: #8b949e; font-size: 13px; font-weight: 500; }
     .metric-val { color: #ffffff; font-weight: 700; }
     .valuation-box { background: #1c2128; border-left: 5px solid #4CAF50; padding: 15px; border-radius: 4px; margin-bottom: 15px; }
-    .thesis-box { background: #161b22; border: 1px solid #30363d; padding: 20px; border-radius: 10px; margin-bottom: 15px; border-top: 3px solid #30363d; }
-    .fail-safe-box { background: #1c2128; border: 1px solid #4CAF50; padding: 10px; border-radius: 8px; text-align: center; }
+    .news-item { padding: 10px 0; border-bottom: 1px solid #30363d; font-size: 14px; }
+    .news-title { color: #58a6ff; font-weight: 600; text-decoration: none; }
+    .news-meta { color: #8b949e; font-size: 11px; margin-top: 4px; }
+    .fail-safe-box { background: #1c2128; border: 1px solid #4CAF50; padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -65,22 +67,25 @@ if run_btn:
         info = stock.info
         hist = stock.history(period=time_period)
         
-        # --- GLOBAL TEMPORAL NORMALIZER ---
         if hist.index.tz is not None:
             hist.index = hist.index.tz_localize(None)
 
-        # --- HEADER (LOGO DISCOVERY) ---
+        # 1. HEADER (FIXED LOGO & MOAT)
         raw_web = info.get('website', '')
         domain = raw_web.replace('https://','').replace('http://','').replace('www.','').split('/')[0] if raw_web else f"{ticker_sym.lower()}.com"
         logo_url = f"https://logo.clearbit.com/{domain}?size=128"
         
         c_h_logo, c_h_text = st.columns([1, 10])
-        c_h_logo.image(logo_url) if domain else c_h_logo.write("📷")
+        if domain:
+            c_h_logo.image(logo_url)
+        else:
+            c_h_logo.write("📷")
             
         p_now = info.get('currentPrice', 0)
         p_chg = info.get('regularMarketChangePercent', 0)
         roa = info.get('returnOnAssets', 0)
-        moat_label, moat_css = ("WIDE MOAT", "wide-moat") if roa > 0.12 else ("NARROW MOAT", "narrow-moat")
+        moat_label = "WIDE MOAT" if roa > 0.12 else "NARROW MOAT"
+        moat_css = "wide-moat" if roa > 0.12 else "narrow-moat"
         
         c_h_text.markdown(f'### {info.get("longName", ticker_sym)} <span class="moat-badge {moat_css}">{moat_label}</span>', unsafe_allow_html=True)
         c_h_text.markdown(f'<div style="font-size:32px; font-weight:800;">${p_now:,.2f} <span style="font-size:18px; color:{"#4CAF50" if p_chg >= 0 else "#FF5252"};">{"▲" if p_chg >= 0 else "▼"} {abs(p_chg):.2f}%</span></div>', unsafe_allow_html=True)
@@ -99,7 +104,7 @@ if run_btn:
                 s5.markdown('<div class="score-card"><div class="score-label">Strength</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
                 s6.markdown('<div class="score-card"><div class="score-label">Valuation</div><div class="score-value">6/10</div></div>', unsafe_allow_html=True)
                 
-                # --- NEXT EARNINGS FAIL-SAFE BOX ---
+                # Next Earnings Fail-Safe
                 try:
                     cal = stock.calendar
                     next_e = "N/A"
@@ -107,10 +112,22 @@ if run_btn:
                         next_e = cal['Earnings Date'][0].strftime('%Y-%m-%d')
                     elif isinstance(cal, pd.DataFrame) and 'Earnings Date' in cal.index:
                         next_e = cal.loc['Earnings Date'][0].strftime('%Y-%m-%d')
-                    st.markdown(f'<div class="fail-safe-box"><b>Next Earnings Announcement:</b> <span style="color:#4CAF50;">{next_e}</span></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="fail-safe-box"><b>Next Earnings:</b> <span style="color:#4CAF50;">{next_e}</span></div>', unsafe_allow_html=True)
                 except: pass
 
-                st.divider(); st.write(info.get('longBusinessSummary'))
+                st.divider()
+                st.write(info.get('longBusinessSummary'))
+                
+                # --- TOP NEWS BOX ---
+                st.subheader("Top Intelligence Feed")
+                ticker_news = stock.news[:5]
+                for n in ticker_news:
+                    st.markdown(f"""
+                        <div class="news-item">
+                            <a class="news-title" href="{n.get('link', '#')}" target="_blank">{n.get('title', 'Headline Unavailable')}</a>
+                            <div class="news-meta">{n.get('publisher', 'Financial Feed')} • {datetime.fromtimestamp(n.get('providerPublishTime', 0)).strftime('%Y-%m-%d')}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
                 
             with co2:
                 st.markdown('<div style="text-align:center; color:#8b949e; font-weight:800; font-size:12px; margin-bottom:15px;">MARKET PULSE</div>', unsafe_allow_html=True)
@@ -122,43 +139,41 @@ if run_btn:
                         spark = get_sparkline(t)
                         if spark: st.plotly_chart(spark, use_container_width=True, config={'displayModeBar': False})
 
-        with tabs[1]: # FINANCIALS (THE 10 METRICS)
+        with tabs[1]: # FINANCIALS (ALL 10 METRICS)
             st.subheader("Institutional Financial Metrics (TTM)")
             f_l, f_r = st.columns(2)
             l_m = {
                 "Price to Earnings Ratio (TTM)": f"{info.get('trailingPE', 0):.2f}",
-                "Forward P/E Ratio (Next Year)": f"{info.get('forwardPE', 0):.2f}",
-                "Projected 3-5 Years EPS Growth": f"{info.get('earningsGrowth', 0)*100:.2f}%",
+                "Forward Price to Earnings Ratio (Next Year)": f"{info.get('forwardPE', 0):.2f}",
+                "Projected 3-5 Years EPS Growth Rate": f"{info.get('earningsGrowth', 0)*100:.2f}%",
                 "Dividend Yield (TTM)": f"{info.get('dividendYield', 0)*100:.2f}%",
-                "PEG Ratio (TTM)": f"{info.get('pegRatio', 'N/A')}"
+                "Price to Earnings Growth Ratio (TTM)": f"{info.get('pegRatio', 'N/A')}"
             }
             r_m = {
                 "Return on Equity (TTM)": f"{info.get('returnOnEquity', 0)*100:.2f}%",
                 "Return on Invested Capital (TTM)": f"{(info.get('returnOnAssets', 0)*1.8)*100:.2f}%",
                 "Free Cash Flow Yield (TTM)": f"{(info.get('freeCashflow',0)/info.get('marketCap',1))*100:.2f}%",
-                "Projected Long Term EPS Growth": f"{info.get('earningsQuarterlyGrowth',0)*100:.2f}%",
-                "Shares Outstanding (Diluted)": f"{info.get('sharesOutstanding',0):,.0f}"
+                "Projected Long Term EPS Growth Rate": f"{info.get('earningsQuarterlyGrowth',0)*100:.2f}%",
+                "Shares Outstanding (Diluted Average)": f"{info.get('sharesOutstanding',0):,.0f}"
             }
             for k,v in l_m.items(): f_l.markdown(f'<div class="metric-row"><span class="metric-name">{k}</span><span class="metric-val">{v}</span></div>', unsafe_allow_html=True)
             for k,v in r_m.items(): f_r.markdown(f'<div class="metric-row"><span class="metric-name">{k}</span><span class="metric-val">{v}</span></div>', unsafe_allow_html=True)
 
-        with tabs[2]: # CHART (RSI + SMA + TEMPORAL EVENTS)
+        with tabs[2]: # CHART (SMA + RSI + TEMPORAL EVENTS)
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
             fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'], name="Price"), row=1, col=1)
             
-            # SMA
             hist['SMA50'] = hist['Close'].rolling(50).mean()
             hist['SMA200'] = hist['Close'].rolling(200).mean()
             fig.add_trace(go.Scatter(x=hist.index, y=hist['SMA50'], name="SMA 50", line=dict(color='orange', width=1.5)), row=1, col=1)
             fig.add_trace(go.Scatter(x=hist.index, y=hist['SMA200'], name="SMA 200", line=dict(color='red', width=1.5)), row=1, col=1)
 
-            # RSI indicator
             hist['RSI'] = calculate_rsi(hist['Close'])
             fig.add_trace(go.Scatter(x=hist.index, y=hist['RSI'], name="RSI", line=dict(color='plum')), row=2, col=1)
             fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
             fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
 
-            # --- FORCED TEMPORAL EVENTS (E & D) ---
+            # --- HARDENED E & D MARKERS ---
             divs = stock.dividends
             if not divs.empty:
                 divs.index = divs.index.tz_localize(None) if divs.index.tz else divs.index
@@ -194,14 +209,13 @@ if run_btn:
             st.divider(); a1, a2, a3 = st.columns(3)
             a1.metric("Analyst Low", f"${info.get('targetLowPrice')}"); a2.metric("Analyst Mean", f"${info.get('targetMeanPrice')}"); a3.metric("Analyst High", f"${info.get('targetHighPrice')}")
 
-        with tabs[4]: # AI THESIS (QUALITATIVE NEWS)
+        with tabs[4]: # AI THESIS
             st.subheader("Institutional Qualitative Research")
-            news = stock.news
-            b1, b2 = st.columns(2)
-            h1 = news[0].get('title', 'Expansion Strategy') if news else 'Revenue Momentum'
-            h2 = news[1].get('title', 'Market Headwinds') if len(news) > 1 else 'Valuation Risks'
-            b1.markdown(f"""<div class="thesis-box"><h4 style="color:#4CAF50;">🟢 Bull Case</h4><b>Headline:</b> {h1}<br><br><b>Narrative:</b> Growth centers on margin expansion and service lock-in. News suggests widening Moat through R&D innovation.</div>""", unsafe_allow_html=True)
-            b2.markdown(f"""<div class="thesis-box"><h4 style="color:#FF5252;">🔴 Bear Case</h4><b>Headline:</b> {h2}<br><br><b>Risk:</b> A debt load of ${info.get('totalDebt',0)/1e9:.1f}B creates ROI pressure. vertical deceleration could de-rate premium multiples.</div>""", unsafe_allow_html=True)
+            t1, t2 = st.columns(2)
+            h1 = ticker_news[0].get('title', 'Expansion Strategy') if ticker_news else 'Revenue Momentum'
+            h2 = ticker_news[1].get('title', 'Market Headwinds') if len(ticker_news) > 1 else 'Valuation Risks'
+            t1.markdown(f"""<div class="thesis-box"><h4 style="color:#4CAF50;">🟢 Bull Case</h4><b>Headline:</b> {h1}<br><br><b>Narrative:</b> Growth centers on ecosystem efficiency and capital allocation. News suggests widening Moat through R&D innovation.</div>""", unsafe_allow_html=True)
+            t2.markdown(f"""<div class="thesis-box"><h4 style="color:#FF5252;">🔴 Bear Case</h4><b>Headline:</b> {h2}<br><br><b>Risk:</b> A debt load of ${info.get('totalDebt',0)/1e9:.1f}B creates ROI pressure. vertical deceleration could de-rate premium multiples.</div>""", unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Sync Interrupted: {e}")
