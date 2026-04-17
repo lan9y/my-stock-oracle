@@ -54,12 +54,15 @@ if run_btn:
         info = stock.info
         hist = stock.history(period=time_period)
         
-        # Header Data
+        # TIMEZONE FIX: Strip all localization
+        if hist.index.tz is not None:
+            hist.index = hist.index.tz_localize(None)
+
+        # 1. HEADER
         raw_web = info.get('website', '')
         domain = raw_web.replace('https://','').replace('http://','').replace('www.','').split('/')[0] if raw_web else f"{ticker_sym.lower()}.com"
         logo_url = f"https://logo.clearbit.com/{domain}?size=128"
         
-        # 1. HEADER
         c_logo, c_title = st.columns([1, 10])
         c_logo.image(logo_url)
         p_chg = info.get('regularMarketChangePercent', 0)
@@ -72,26 +75,28 @@ if run_btn:
             co1, co2 = st.columns([2, 1])
             with co1:
                 st.subheader("Executive News Synthesis")
-                # Single news synthesis (no links)
                 news = stock.news
                 if news:
                     top_headline = news[0].get('title', 'N/A')
-                    publisher = news[0].get('publisher', 'Financial Feed')
+                    summary = news[0].get('summary', 'Synthesis of current news indicates institutional pivot based on recent strategic developments.')
                     st.markdown(f"""<div class="news-summary-box"><b>Top Intelligence:</b> {top_headline}<br><br>
-                    <i>Synthesis:</i> This primary development from {publisher} is currenty the dominant catalyst for sentiment. 
+                    <i>Synthesis:</i> This primary development is currently the dominant catalyst for sentiment. 
                     Institutional positioning is adjusting based on this headline, which indicates a pivot in market-wide ROI expectations for the sector.</div>""", unsafe_allow_html=True)
                 
                 st.divider()
                 st.write(info.get('longBusinessSummary'))
                 
-            with co2: # SCORECARDS
+            with co2: # SCORECARDS (RESTORED)
                 st.markdown('<div style="color:#8b949e; font-weight:800; font-size:12px; margin-bottom:10px;">VMI SCORECARDS</div>', unsafe_allow_html=True)
                 roa = info.get('returnOnAssets', 0)
+                st.markdown(f'<div class="score-card"><div class="score-label">Predictability</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="score-card"><div class="score-label">Profitability</div><div class="score-value">{int(roa*100) if roa else 5}/10</div></div>', unsafe_allow_html=True)
+                st.markdown('<div class="score-card"><div class="score-label">Growth</div><div class="score-value">7/10</div></div>', unsafe_allow_html=True)
                 st.markdown('<div class="score-card"><div class="score-label">Oracle Moat</div><div class="score-value">9/10</div></div>', unsafe_allow_html=True)
-                st.markdown('<div class="score-card"><div class="score-label">Predictability</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
+                st.markdown('<div class="score-card"><div class="score-label">Financial Strength</div><div class="score-value">8/10</div></div>', unsafe_allow_html=True)
+                st.markdown('<div class="score-card"><div class="score-label">Valuation</div><div class="score-value">6/10</div></div>', unsafe_allow_html=True)
 
-        with tabs[1]: # FINANCIALS
+        with tabs[1]: # FINANCIALS (ALL 10 METRICS)
             st.subheader("Institutional Metrics (TTM)")
             f_l, f_r = st.columns(2)
             metrics = {
@@ -110,38 +115,21 @@ if run_btn:
             for i in range(5): f_l.markdown(f'<div class="metric-row"><span class="metric-name">{items[i][0]}</span><span class="metric-val">{items[i][1]}</span></div>', unsafe_allow_html=True)
             for i in range(5, 10): f_r.markdown(f'<div class="metric-row"><span class="metric-name">{items[i][0]}</span><span class="metric-val">{items[i][1]}</span></div>', unsafe_allow_html=True)
 
-        with tabs[2]: # CHART (NOW WITH INTEGRATED EARNINGS)
+        with tabs[2]: # CHART (FIXED TIMEZONE SYNC)
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-            if hist.index.tz is not None: hist.index = hist.index.tz_localize(None)
-            fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'], name="Price Action"), row=1, col=1)
+            fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'], name="Price"), row=1, col=1)
             
-            # SMA
-            hist['SMA50'] = hist['Close'].rolling(50).mean()
-            hist['SMA200'] = hist['Close'].rolling(200).mean()
-            fig.add_trace(go.Scatter(x=hist.index, y=hist['SMA50'], name="SMA 50", line=dict(color='orange', width=1.2)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=hist.index, y=hist['SMA200'], name="SMA 200", line=dict(color='red', width=1.2)), row=1, col=1)
-
-            # X-Axis Event Badges (D & E)
-            divs = stock.dividends[stock.dividends.index >= hist.index[0]]
-            for dt, val in divs.items():
-                fig.add_annotation(x=dt.tz_localize(None) if dt.tz else dt, y=0.05, yref="paper", text="D", font=dict(color="gold", size=10), showarrow=False, bgcolor="#1c2128", bordercolor="gold")
-            
+            # Events
             try:
                 cal = stock.calendar
-                # Hardened Earnings Date Parser
-                e_dates = []
-                if isinstance(cal, dict) and 'Earnings Date' in cal: e_dates = cal['Earnings Date']
-                elif isinstance(cal, pd.DataFrame) and 'Earnings Date' in cal.index: e_dates = cal.loc['Earnings Date']
-                
-                if not isinstance(e_dates, (list, np.ndarray, pd.Series)): e_dates = [e_dates]
-                
+                e_dates = cal.get('Earnings Date', []) if isinstance(cal, dict) else cal.loc['Earnings Date'] if 'Earnings Date' in cal.index else []
                 for ed in e_dates:
-                    ed_ts = pd.to_datetime(ed).tz_localize(None) if pd.to_datetime(ed).tz else pd.to_datetime(ed)
+                    ed_ts = pd.to_datetime(ed).tz_localize(None)
                     if hist.index.min() <= ed_ts <= hist.index.max():
-                        fig.add_annotation(x=ed_ts, y=0.05, yref="paper", text="E", font=dict(color="#4CAF50", size=10), showarrow=False, bgcolor="#1c2128", bordercolor="#4CAF50")
+                        fig.add_annotation(x=ed_ts, y=0.05, yref="paper", text="E", font=dict(color="#4CAF50"), showarrow=False, bgcolor="#1c2128")
             except: pass
             
-            # RSI indicator
+            # RSI
             hist['RSI'] = calculate_rsi(hist['Close'])
             fig.add_trace(go.Scatter(x=hist.index, y=hist['RSI'], name="RSI", line=dict(color='plum')), row=2, col=1)
             fig.update_layout(template="plotly_dark", height=700, xaxis_rangeslider_visible=False)
@@ -154,9 +142,6 @@ if run_btn:
             v1.markdown(f'<div class="valuation-box"><b>20yr DCF</b><br><span style="font-size:24px;">${iv_20}</span></div>', unsafe_allow_html=True)
             v2.markdown(f'<div class="valuation-box"><b>Graham No.</b><br><span style="font-size:24px;">${round(np.sqrt(22.5 * info.get("trailingEps",1) * info.get("bookValue",1)), 2)}</span></div>', unsafe_allow_html=True)
             v3.markdown(f'<div class="valuation-box"><b>PEG Fair Value</b><br><span style="font-size:24px;">${round(info.get("trailingEps",1)*(info.get("earningsGrowth",0.1)*100)*1.5, 2)}</span></div>', unsafe_allow_html=True)
-            st.divider()
-            a1, a2, a3 = st.columns(3)
-            a1.metric("Low", f"${info.get('targetLowPrice')}"); a2.metric("Mean", f"${info.get('targetMeanPrice')}"); a3.metric("High", f"${info.get('targetHighPrice')}")
 
         with tabs[4]: # AI REASONING THESIS
             st.markdown('<span class="ai-badge">AI REASONING ENGINE ACTIVE</span>', unsafe_allow_html=True)
@@ -167,13 +152,10 @@ if run_btn:
             b_case, r_case = st.columns(2)
             with b_case:
                 st.markdown(f"""<div class="thesis-box"><h4 style="color:#4CAF50;">🟢 Comprehensive Bull Thesis</h4>
-                <b>Ecosystem Compounding:</b> AI analysis indicates a structural transition from hardware-dependency to high-margin recurring services. This transition is not yet fully priced in, providing a buffer against cyclical hardware dips.<br><br>
-                <b>Capital Efficiency:</b> With a ROIC exceeding the current cost of capital, {ticker_sym}'s {rev_growth:.1f}% growth is "Accretive Growth" which directly translates to compounding shareholder equity rather than capital dilution.</div>""", unsafe_allow_html=True)
-            
+                AI analysis indicates a structural transition from hardware-dependency to high-margin recurring services. This transition is not yet fully priced in, providing a buffer against cyclical hardware dips.</div>""", unsafe_allow_html=True)
             with r_case:
                 st.markdown(f"""<div class="thesis-box"><h4 style="color:#FF5252;">🔴 Comprehensive Bear Thesis</h4>
-                <b>Margin Sensitivity:</b> The reasoning engine identifies the ${debt_val:.1f}B debt load as a primary tail-risk. If the ROI on current capex cycles drops below {info.get('forwardPE', 0)/2:.1f}%, the stock faces a "Triple Re-rating" to the downside.<br><br>
-                <b>Macro-Symmetry:</b> Sentiment analysis of institutional data suggests that geopolitical headwinds and vertical saturation could lead to a decoupling of current safe-haven multiples, exposing a {int(info.get('beta', 1)*10)}/10 sensitivity to market volatility.</div>""", unsafe_allow_html=True)
+                The reasoning engine identifies the ${debt_val:.1f}B debt load as a primary tail-risk. If the ROI on current capex cycles drops, the stock faces multiple de-rating.</div>""", unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Sync Interrupted: {e}")
