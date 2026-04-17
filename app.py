@@ -19,7 +19,7 @@ st.markdown("""
     .moat-badge { padding: 4px 12px; border-radius: 15px; font-weight: 800; font-size: 12px; margin-left: 10px; border: 1px solid; }
     .wide-moat { background-color: #1b4d3e; color: #4CAF50; border-color: #4CAF50; }
     .metric-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #30363d; }
-    .metric-name { color: #8b949e; font-size: 14px; font-weight: 500; }
+    .metric-name { color: #8b949e; font-size: 13px; font-weight: 500; }
     .metric-val { color: #ffffff; font-weight: 700; }
     .valuation-box { background: #1c2128; border-left: 5px solid #4CAF50; padding: 15px; border-radius: 4px; margin-bottom: 15px; }
     .thesis-box { background: #161b22; border: 1px solid #30363d; padding: 20px; border-radius: 10px; margin-bottom: 15px; border-top: 3px solid #30363d; }
@@ -64,22 +64,25 @@ if run_btn:
         info = stock.info
         hist = stock.history(period=time_period)
         
-        # --- HEADER (RESTORED LOGO WITH FALLBACK) ---
+        # CRITICAL FIX: STRIP TIMEZONE IMMEDIATELY
+        if hist.index.tz is not None:
+            hist.index = hist.index.tz_localize(None)
+
+        # 1. HEADER (LOGO & MOAT)
         raw_web = info.get('website', '')
-        domain = raw_web.replace('https://','').replace('http://','').replace('www.','').split('/')[0] if raw_web else ""
-        if not domain: domain = f"{ticker_sym.lower()}.com"
-        logo_url = f"https://logo.clearbit.com/{domain}?size=100"
+        domain = raw_web.replace('https://','').replace('http://','').replace('www.','').split('/')[0] if raw_web else f"{ticker_sym.lower()}.com"
+        logo_url = f"https://logo.clearbit.com/{domain}?size=128"
         
-        c_h1, c_h2 = st.columns([1, 10])
-        c_h1.image(logo_url)
+        c_head_1, c_head_2 = st.columns([1, 10])
+        c_head_1.image(logo_url)
             
         p_now = info.get('currentPrice', 0)
         p_chg = info.get('regularMarketChangePercent', 0)
         roa = info.get('returnOnAssets', 0)
         moat_label, moat_css = ("WIDE MOAT", "wide-moat") if roa > 0.12 else ("NARROW MOAT", "narrow-moat")
         
-        c_h2.markdown(f'### {info.get("longName", ticker_sym)} <span class="moat-badge {moat_css}">{moat_label}</span>', unsafe_allow_html=True)
-        c_h2.markdown(f'<div style="font-size:32px; font-weight:800;">${p_now:,.2f} <span style="font-size:18px; color:{"#4CAF50" if p_chg >= 0 else "#FF5252"};">{"▲" if p_chg >= 0 else "▼"} {abs(p_chg):.2f}%</span></div>', unsafe_allow_html=True)
+        c_head_2.markdown(f'### {info.get("longName", ticker_sym)} <span class="moat-badge {moat_css}">{moat_label}</span>', unsafe_allow_html=True)
+        c_head_2.markdown(f'<div style="font-size:32px; font-weight:800;">${p_now:,.2f} <span style="font-size:18px; color:{"#4CAF50" if p_chg >= 0 else "#FF5252"};">{"▲" if p_chg >= 0 else "▼"} {abs(p_chg):.2f}%</span></div>', unsafe_allow_html=True)
 
         tabs = st.tabs(["📊 Overview", "📑 Financials", "📈 Advanced Chart", "🎯 Valuation", "🤖 AI Thesis"])
 
@@ -97,12 +100,13 @@ if run_btn:
             co2.markdown('<div style="text-align:center; color:#8b949e; font-weight:800; font-size:12px; margin-bottom:15px;">MARKET PULSE</div>', unsafe_allow_html=True)
             for t in ["SPY", "QQQ", "DIA"]:
                 p_data = yf.Ticker(t).history(period="2d")
-                px, chg = p_data['Close'].iloc[-1], ((p_data['Close'].iloc[-1]-p_data['Close'].iloc[-2])/p_data['Close'].iloc[-2])*100
-                co2.markdown(f'<div class="etf-card"><b>{t}</b> ${px:,.2f} <span style="color:{"#4CAF50" if chg >= 0 else "#FF5252"};">{chg:+.2f}%</span></div>', unsafe_allow_html=True)
-                spark = get_sparkline(t)
-                if spark: co2.plotly_chart(spark, use_container_width=True, config={'displayModeBar': False})
+                if not p_data.empty:
+                    px, chg = p_data['Close'].iloc[-1], ((p_data['Close'].iloc[-1]-p_data['Close'].iloc[-2])/p_data['Close'].iloc[-2])*100
+                    co2.markdown(f'<div class="etf-card"><b>{t}</b> ${px:,.2f} <span style="color:{"#4CAF50" if chg >= 0 else "#FF5252"};">{chg:+.2f}%</span></div>', unsafe_allow_html=True)
+                    spark = get_sparkline(t)
+                    if spark: co2.plotly_chart(spark, use_container_width=True, config={'displayModeBar': False})
 
-        with tabs[1]: # FINANCIALS (STRICTLY THE 10 REQUESTED)
+        with tabs[1]: # FINANCIALS (ALL 10 METRICS)
             st.subheader("Institutional Financial Metrics (TTM)")
             f_l, f_r = st.columns(2)
             l_m = {
@@ -122,45 +126,43 @@ if run_btn:
             for k,v in l_m.items(): f_l.markdown(f'<div class="metric-row"><span class="metric-name">{k}</span><span class="metric-val">{v}</span></div>', unsafe_allow_html=True)
             for k,v in r_m.items(): f_r.markdown(f'<div class="metric-row"><span class="metric-name">{k}</span><span class="metric-val">{v}</span></div>', unsafe_allow_html=True)
 
-        with tabs[2]: # CHART (SMA + RSI + HARDENED EVENTS)
+        with tabs[2]: # CHART (SMA + RSI + EVENTS)
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-            # Strip timezones for matching
-            hist.index = hist.index.tz_localize(None)
             fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'], name="Price"), row=1, col=1)
             
-            # Technicals
+            # SMA
             hist['SMA50'] = hist['Close'].rolling(50).mean()
             hist['SMA200'] = hist['Close'].rolling(200).mean()
-            fig.add_trace(go.Scatter(x=hist.index, y=hist['SMA50'], name="SMA 50", line=dict(color='orange', width=1.2)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=hist.index, y=hist['SMA200'], name="SMA 200", line=dict(color='red', width=1.2)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=hist.index, y=hist['SMA50'], name="SMA 50", line=dict(color='orange', width=1.5)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=hist.index, y=hist['SMA200'], name="SMA 200", line=dict(color='red', width=1.5)), row=1, col=1)
 
-            # RSI with X-Axis
+            # RSI indicator
             hist['RSI'] = calculate_rsi(hist['Close'])
             fig.add_trace(go.Scatter(x=hist.index, y=hist['RSI'], name="RSI", line=dict(color='plum')), row=2, col=1)
             fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
             fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
 
-            # X-AXIS EVENT BADGES (D & E)
+            # HARDENED EVENT BADGES (STRIP TZ)
             divs = stock.dividends[stock.dividends.index >= hist.index[0]]
-            for dt, val in divs.items():
-                fig.add_annotation(x=dt.tz_localize(None), y=0.05, yref="paper", text="D", font=dict(color="gold", size=10), showarrow=False, bgcolor="#1c2128", bordercolor="gold")
+            for d_idx in divs.index:
+                dt_naive = d_idx.tz_localize(None) if d_idx.tz else d_idx
+                fig.add_annotation(x=dt_naive, y=0.05, yref="paper", text="D", font=dict(color="gold", size=10), showarrow=False, bgcolor="#1c2128", bordercolor="gold")
             
             try:
                 cal = stock.calendar
-                # Handle calendar date matching correctly
-                if 'Earnings Date' in cal:
-                    e_dates = cal['Earnings Date'] if isinstance(cal['Earnings Date'], list) else [cal['Earnings Date']]
-                    for ed in e_dates:
-                        ed_clean = pd.to_datetime(ed).tz_localize(None)
-                        if hist.index[0] <= ed_clean <= hist.index[-1]:
-                            fig.add_annotation(x=ed_clean, y=0.05, yref="paper", text="E", font=dict(color="#4CAF50", size=10), showarrow=False, bgcolor="#1c2128", bordercolor="#4CAF50")
+                if cal is not None and 'Earnings Date' in cal:
+                    for ed in cal['Earnings Date']:
+                        ed_ts = pd.to_datetime(ed).tz_localize(None) if pd.to_datetime(ed).tz else pd.to_datetime(ed)
+                        if hist.index[0] <= ed_ts <= hist.index[-1]:
+                            fig.add_annotation(x=ed_ts, y=0.05, yref="paper", text="E", font=dict(color="#4CAF50", size=10), showarrow=False, bgcolor="#1c2128", bordercolor="#4CAF50")
             except: pass
 
-            fig.update_layout(template="plotly_dark", height=700, xaxis_rangeslider_visible=False)
+            fig.update_layout(template="plotly_dark", height=700, xaxis_rangeslider_visible=False, xaxis_title="Date")
+            fig.update_xaxes(showticklabels=True, row=2, col=1)
             st.plotly_chart(fig, use_container_width=True)
 
-        with tabs[3]: # VALUATION (CLUSTER & ANALYST)
-            st.subheader("Fair Value Clusters & Analyst Targets")
+        with tabs[3]: # VALUATION
+            st.subheader("Diversified Valuation Cluster")
             v_l, v_r = st.columns(2)
             iv_20 = vmi_20yr_dcf(info.get('freeCashflow',0), info.get('totalDebt',0), info.get('totalCash',0), info.get('sharesOutstanding',1), info.get('beta',1.1))
             v_l.markdown(f'<div class="valuation-box"><b>VMI 20yr DCF</b><br><span style="font-size:24px;">${iv_20}</span></div>', unsafe_allow_html=True)
@@ -170,14 +172,18 @@ if run_btn:
             st.divider(); a1, a2, a3 = st.columns(3)
             a1.metric("Analyst Low", f"${info.get('targetLowPrice')}"); a2.metric("Analyst Mean", f"${info.get('targetMeanPrice')}"); a3.metric("Analyst High", f"${info.get('targetHighPrice')}")
 
-        with tabs[4]: # AI THESIS (DATA-NEWS DRIVEN)
+        with tabs[4]: # AI THESIS (QUALITATIVE)
             st.subheader("Institutional Research Thesis")
             news = stock.news
             b1, b2 = st.columns(2)
-            h1 = news[0].get('title', 'Strategic Catalyst') if news else 'Revenue Expansion'
-            h2 = news[1].get('title', 'Headwinds Identified') if len(news) > 1 else 'Multiple Compression Risk'
-            b1.markdown(f"""<div class="thesis-box"><h4 style="color:#4CAF50;">🟢 Bull Case</h4><b>Signal:</b> {h1}<br><br><b>Growth Narrative:</b> Growth centers on margin expansion and ecosystem lock-in. News suggests a widening Oracle Moat through innovation.</div>""", unsafe_allow_html=True)
-            b2.markdown(f"""<div class="thesis-box"><h4 style="color:#FF5252;">🔴 Bear Case</h4><b>Risk:</b> {h2}<br><br><b>Constraint:</b> A debt load of ${info.get('totalDebt',0)/1e9:.1f}B creates ROI pressure. vertical deceleration could de-rate the multiple.</div>""", unsafe_allow_html=True)
+            h1 = news[0].get('title', 'Revenue Catalyst') if news else 'Strategic Expansion'
+            h2 = news[1].get('title', 'ROI Headwinds') if len(news) > 1 else 'Market Risks'
+            
+            b1.markdown(f"""<div class="thesis-box"><h4 style="color:#4CAF50;">🟢 Bull Case</h4>
+            <b>Headline:</b> {h1}<br><br>
+            <b>Growth Story:</b> Narrative centers on {ticker_sym}'s recent M&A synergies and their widening Moat in core services. Increased investment in high-margin verticals suggests significant topline expansion ahead.</div>""", unsafe_allow_html=True)
+            b2.markdown(f"""<div class="thesis-box"><h4 style="color:#FF5252;">🔴 Bear Case</h4>
+            <b>Risk Narrative:</b> Bear concerns revolve around the ROI of a massive capex cycle (Debt: ${info.get('totalDebt',0)/1e9:.1f}B). Qualitative risks include regulatory scrutiny and potential margin compression if vertical growth decelerates.</div>""", unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Sync Interrupted: {e}")
